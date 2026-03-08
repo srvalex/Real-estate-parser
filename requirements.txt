@@ -1,0 +1,8 @@
+playwright
+bs4
+pandas
+requests
+json
+time
+tqdm
+curl_cffi
