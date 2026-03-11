@@ -50,42 +50,44 @@ async def get_storia_manual(url):
         finally:
             await browser.close()
 
-async def get_storia_data(url):
+import asyncio
+import sys
+import json
+from playwright.async_api import async_playwright
+
+async def fetch_url(context, url):
+    page = await context.new_page()
+    # OPTIMIZATION: Block images and css to save 70% bandwidth/time
+    await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
+    
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        raw_json = await page.evaluate('() => document.getElementById("__NEXT_DATA__").textContent')
+        full_data = json.loads(raw_json)
+        offer_data = full_data.get('props', {}).get('pageProps', {}).get('ad', {})
+        return {"url": url, "status": "success", "data": offer_data}
+    except Exception as e:
+        return {"url": url, "status": "error", "message": str(e)}
+    finally:
+        await page.close()
+
+async def scrape_batch(urls):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
+        context = await browser.new_context(user_agent="Mozilla/5.0... Chrome/122.0.0.0")
         
-        try:
-            # 1. Navigate
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            
-            # 2. Extract the JSON from the __NEXT_DATA__ script tag directly from the DOM
-            # This is much faster and more reliable than BeautifulSoup
-            raw_json = await page.evaluate('() => document.getElementById("__NEXT_DATA__").textContent')
-            
-            if not raw_json:
-                return {"status": "error", "message": "JSON tag not found"}
-
-            full_data = json.loads(raw_json)
-            # Drill down to the actual listing data
-            offer_data = full_data.get('props', {}).get('pageProps', {}).get('ad', {})
-            
-            return {"status": "success", "data": offer_data}
-
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-        finally:
-            await browser.close()
+        # Run all URLs in this batch simultaneously
+        tasks = [fetch_url(context, url) for url in urls]
+        results = await asyncio.gather(*tasks)
+        
+        await browser.close()
+        return results
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    # Expecting URLs as a comma-separated string or multiple args
+    input_urls = sys.argv[1:]
+    if not input_urls:
         sys.exit(1)
-    
-    target_url = sys.argv[1]
-    result = asyncio.run(get_storia_data(target_url))
-    result['URL'] = target_url
-    # We print ONLY the final JSON result to stdout
-    print(json.dumps(result, ensure_ascii=False))
+        
+    results = asyncio.run(scrape_batch(input_urls))
+    print(json.dumps(results, ensure_ascii=False))
