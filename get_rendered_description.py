@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 import json
 import asyncio
 import sys
+import io
 from playwright.async_api import async_playwright
 
 async def get_storia_manual(url):
@@ -83,11 +84,51 @@ async def scrape_batch(urls):
         await browser.close()
         return results
 
+# Inside get_rendered_description.py
+# Force UTF-8 for Windows output to avoid encoding crashes
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+def safe_serialize(obj):
+    """Recursively converts non-serializable objects to strings."""
+    if isinstance(obj, dict):
+        return {k: safe_serialize(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [safe_serialize(i) for i in obj]
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    else:
+        return str(obj)
+
 if __name__ == "__main__":
-    # Expecting URLs as a comma-separated string or multiple args
-    input_urls = sys.argv[1:]
+    # Read from stdin
+    input_data = sys.stdin.read().strip()
+    if not input_data:
+        sys.exit(0)
+
+    try:
+        # Expecting a JSON list of URLs
+        input_urls = json.loads(input_data)
+    except Exception as e:
+        # Fallback for manual testing via command line
+        input_urls = sys.argv[1:]
+
     if not input_urls:
-        sys.exit(1)
-        
+        sys.exit(0)
+
+    # Run the scraper
     results = asyncio.run(scrape_batch(input_urls))
-    print(json.dumps(results, ensure_ascii=False))
+
+    try:
+        # 1. Clean the data to ensure it's all JSON-safe
+        clean_results = safe_serialize(results)
+        
+        # 2. Dump to string first
+        output_string = json.dumps(clean_results, ensure_ascii=False)
+        
+        # 3. Print the final result
+        print(output_string)
+        
+    except Exception as e:
+        # If it STILL fails, we need to know why in the main pipeline's stderr
+        sys.stderr.write(f"CRITICAL SERIALIZATION ERROR: {str(e)}\n")
+        sys.exit(1)

@@ -109,7 +109,6 @@ def collect_storia_links(url: str, num_pages: int) -> list:
 
 
 def build_links_df(olx_url=None, storia_url=None, olx_pages=1, storia_pages=1) -> pd.DataFrame:
-    print("📡 Collecting listing links...")
     raw = []
     if olx_url:
         raw += collect_olx_links(olx_url, olx_pages)
@@ -168,25 +167,33 @@ def scrape_olx(url: str) -> dict | None:
         print(f"  [olx parse error] {url}: {e}")
         return None
 
-
 def scrape_storia_batch(urls: list[str]) -> list[dict]:
-    """Call get_rendered_description.py as a subprocess (handles JS rendering)."""
     if not urls:
         return []
     script = os.path.join(os.path.dirname(__file__), "get_rendered_description.py")
     try:
+        # We NO LONGER add + urls to the list
         proc = subprocess.Popen(
-            ["python", script] + urls,
+            ["python", script], 
+            stdin=subprocess.PIPE,  # Enable stdin
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
         )
-        stdout, stderr = proc.communicate()
+        
+        # Pass the URLs as a JSON string through communicate
+        stdout, stderr = proc.communicate(input=json.dumps(urls))
+        
         if stdout.strip():
-            return json.loads(stdout.strip())
+            try:
+                return json.loads(stdout.strip())
+            except json.JSONDecodeError:
+                print(f"  [storia json error] Invalid output: {stdout[:100]}")
+                return []
         else:
-            print(f"  [storia batch error] {stderr[:200]}")
+            if stderr:
+                print(f"  [storia batch error] {stderr[:200]}")
             return []
     except Exception as e:
         print(f"  [storia subprocess error] {e}")
@@ -228,63 +235,107 @@ def extract_storia(raw: dict) -> dict | None:
 # ─────────────────────────────────────────────
 #  Step 3 — Orchestration
 # ─────────────────────────────────────────────
+DB_NAME = "real_estate.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    # Define columns based on your header
+    cols = "link TEXT PRIMARY KEY, id TEXT, platform TEXT, title TEXT, rent TEXT, description TEXT, url TEXT, price TEXT, m TEXT, rooms_num TEXT, building_type TEXT, floor_no TEXT, building_floors_num TEXT, building_material TEXT, windows_type TEXT, heating TEXT, build_year TEXT, construction_status TEXT, free_from TEXT, district TEXT, location_full_name TEXT, features TEXT, deposit TEXT, remote_services TEXT, scraped_at TEXT"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS listings ({cols})")
+    return conn
+
 
 def run_pipeline(
     olx_url:      str | None = None,
     storia_url:   str | None = None,
     olx_pages:    int = 1,
     storia_pages: int = 1,
-    storia_batch: int = 5,
+    storia_batch: int = 10,
     out_csv:      str = "results.csv",
 ) -> pd.DataFrame:
     """
-    Full end-to-end extraction.
-    Returns a combined DataFrame and saves it to `out_csv`.
+    Full end-to-end extraction with SQLite caching.
     """
+    # ── 0. Initialize DB ──────────────────────
+    conn = init_db() # Assumes the init_db function provided earlier
 
-    # ── 1. Collect links ──────────────────────
+    # ── 1. Collect all links from search pages ──
     links_df = build_links_df(olx_url, storia_url, olx_pages, storia_pages)
+    all_found_links = links_df["link"].tolist()
 
-    olx_links    = links_df[links_df["platform"] == "olx"]["link"].tolist()
-    storia_links = links_df[links_df["platform"] == "storia"]["link"].tolist()
+    if not all_found_links:
+        print("⚠️ No links found to process.")
+        return pd.DataFrame()
 
-    results_olx    = []
+    # ── 2. Check Database for existing records ──
+    # We query the DB to see which of these links we already have
+    placeholders = ', '.join(['?'] * len(all_found_links))
+    query = f"SELECT * FROM listings WHERE url IN ({placeholders})"
+    
+    # Existing data from DB
+    df_cached = pd.read_sql_query(query, conn, params=all_found_links)
+    cached_urls = set(df_cached["url"].tolist())
+
+    # Filter links that actually need scraping
+    olx_to_scrape = [l for l in all_found_links if l not in cached_urls and "olx.ro" in l]
+    storia_to_scrape = [l for l in all_found_links if l not in cached_urls and "storia.ro" in l]
+
+    print(f"📊 Cache: {len(df_cached)} found | 🚀 To Scrape: {len(olx_to_scrape)} OLX, {len(storia_to_scrape)} Storia")
+
+    results_olx = []
     results_storia = []
 
-    # ── 2a. Scrape OLX (sequential, polite) ──
+    # ── 3a. Scrape OLX (New only) ──
     def process_olx():
-        print(f"\n🔶 Scraping {len(olx_links)} OLX listings...")
-        for link in tqdm(olx_links, desc="OLX", ncols=70):
+        if not olx_to_scrape: return
+        print(f"\n🔶 Scraping {len(olx_to_scrape)} NEW OLX listings...")
+        for link in tqdm(olx_to_scrape, desc="OLX", ncols=70):
             data = scrape_olx(link)
             if data:
+                # Ensure it fits your DB columns (rent vs price)
+                data['price'] = data.get('rent') 
                 results_olx.append(data)
             time.sleep(1.2)
 
-    # ── 2b. Scrape Storia (batched via Playwright) ──
+    # ── 3b. Scrape Storia (New only) ──
     def process_storia():
-        print(f"\n🔷 Scraping {len(storia_links)} Storia listings (batch={storia_batch})...")
-        for i in tqdm(range(0, len(storia_links), storia_batch), desc="Storia batches", ncols=70):
-            chunk  = storia_links[i : i + storia_batch]
+        if not storia_to_scrape: return
+        print(f"\n🔷 Scraping {len(storia_to_scrape)} NEW Storia listings (batch={storia_batch})...")
+        for i in tqdm(range(0, len(storia_to_scrape), storia_batch), desc="Storia batches", ncols=70):
+            chunk  = storia_to_scrape[i : i + storia_batch]
             batch  = scrape_storia_batch(chunk)
             parsed = [extract_storia(r) for r in batch]
-            results_storia.extend(r for r in parsed if r)
+            for p in parsed:
+                if p:
+                    # Sync price/rent columns
+                    p['rent'] = p.get('price') 
+                    results_storia.append(p)
             time.sleep(2)
 
-    # Run both in parallel
+    # Run scrapers in parallel for new content
     with ThreadPoolExecutor(max_workers=2) as ex:
         ex.submit(process_olx)
         ex.submit(process_storia)
 
-    # ── 3. Combine & save ────────────────────
-    df_olx    = pd.DataFrame(results_olx)    if results_olx    else pd.DataFrame()
-    df_storia = pd.DataFrame(results_storia) if results_storia else pd.DataFrame()
-    combined  = pd.concat([df_olx, df_storia], ignore_index=True)
+    # ── 4. Save New Data to DB ────────────────
+    new_results = results_olx + results_storia
+    df_new = pd.DataFrame()
+    
+    if new_results:
+        df_new = pd.DataFrame(new_results)
+        df_new["scraped_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Save to DB so we don't scrape them next time
+        df_new.to_sql("listings", conn, if_exists="append", index=False)
+        print(f"💾 Added {len(df_new)} new records to database.")
 
-    combined["scraped_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # ── 5. Combine & Finalize ─────────────────
+    combined = pd.concat([df_cached, df_new], ignore_index=True)
+    conn.close()
 
     out_path = os.path.join(os.path.dirname(__file__), out_csv)
     combined.to_csv(out_path, index=False, encoding="utf-8-sig")
-    print(f"\n✅ Done. {len(combined)} listings saved → {out_path}")
+    print(f"\n✅ Done. Total pipeline output: {len(combined)} listings.")
 
     return combined
 
@@ -298,10 +349,13 @@ JOB = {
     "storia_url": "https://www.storia.ro/ro/rezultate/inchiriere/apartament/bucuresti?ownerTypeSingleSelect=ALL",
     "olx_pages":    1,
     "storia_pages": 1,
-    "storia_batch": 5,          # how many Storia tabs open at once
+    "storia_batch": 10,          # how many Storia tabs open at once
     "out_csv":    "results.csv", # saved next to this script
 }
 
 if __name__ == "__main__":
     df = run_pipeline(**JOB)
-    print(df[["platform", "title", "rent", "district"]].head(10).to_string())
+    # print(df[["platform", "title", "rent", "district"]].head(10).to_string())
+
+
+

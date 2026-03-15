@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 import os
-from ollama_parser import parse_vibe, list_models, DEFAULT_MODEL
+from ollama_parser import parse_vibe, check_server, DEFAULT_SERVER_URL
 
 # ─────────────────────────────────────────────
 #  Page config
@@ -102,15 +102,6 @@ label[data-testid="stWidgetLabel"] {
     max-width: 520px;
     margin: 0 auto 2.5rem auto;
     line-height: 1.7;
-}
-
-.search-card {
-    background: #151724;
-    border: 1px solid #2d3047;
-    border-radius: 20px;
-    padding: 2.5rem;
-    max-width: 760px;
-    margin: 0 auto;
 }
 
 .vibe-label {
@@ -312,7 +303,6 @@ if st.session_state.page == "home":
     with st.container():
         _, center, _ = st.columns([1, 2.5, 1])
         with center:
-            st.markdown('<div class="search-card">', unsafe_allow_html=True)
 
             # ── Vibe ──
             st.markdown('<div class="vibe-label">✨ What\'s the vibe you\'re after?</div>', unsafe_allow_html=True)
@@ -353,22 +343,25 @@ if st.session_state.page == "home":
             with scrape_tab:
                 sc1, sc2 = st.columns(2)
                 with sc1:
-                    olx_url = st.text_input("OLX URL", value="https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/bucuresti/?currency=EUR")
                     olx_pages = st.number_input("OLX pages", min_value=1, max_value=20, value=1)
                 with sc2:
-                    storia_url = st.text_input("Storia URL", value="https://www.storia.ro/ro/rezultate/inchiriere/apartament/bucuresti?ownerTypeSingleSelect=ALL")
                     storia_pages = st.number_input("Storia pages", min_value=1, max_value=20, value=1)
+                
+                # Hardcoded URLs as requested
+                olx_url = "https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/bucuresti/?currency=EUR"
+                storia_url = "https://www.storia.ro/ro/rezultate/inchiriere/apartament/bucuresti?ownerTypeSingleSelect=ALL"
+                
                 scrape_config = {"olx_url": olx_url, "storia_url": storia_url,
                                  "olx_pages": olx_pages, "storia_pages": storia_pages}
                 st.caption("⚠️ Scraping runs while you wait — 1 page takes ~1–2 min.")
 
-            # ── Model selector ──
-            available_models = list_models()
-            if available_models:
-                model_choice = st.selectbox("Ollama model", available_models, index=0)
+            # ── Colab server URL (Hardcoded) ──
+            server_url = DEFAULT_SERVER_URL
+            is_online = check_server(server_url)
+            if is_online:
+                st.caption("✅ Server is reachable")
             else:
-                model_choice = DEFAULT_MODEL
-                st.caption(f"⚠️ Ollama not detected — will try `{DEFAULT_MODEL}` when you search.")
+                st.caption("⚠️ Server not reachable — make sure Colab is running and DEFAULT_SERVER_URL in ollama_parser.py is currently updated.")
 
             st.markdown('<br>', unsafe_allow_html=True)
 
@@ -379,6 +372,12 @@ if st.session_state.page == "home":
 
             st.markdown('</div>', unsafe_allow_html=True)
 
+        parsed_params = None
+        parse_error   = None
+        if vibe.strip():
+            with st.spinner("Extraing keywords from your prompt"):
+                parsed_params, parse_error = parse_vibe(vibe, server_url=server_url)
+        
     # Handle search
     if search_clicked:
         # ── Decide data source ──
@@ -395,9 +394,31 @@ if st.session_state.page == "home":
             import sys
             sys.path.insert(0, DATA_DIR)
             from extractor import run_pipeline
-            with st.spinner("🕷️ Scraping listings… this may take a minute or two"):
+            
+            final_olx_url = scrape_config["olx_url"]
+            if parsed_params and isinstance(parsed_params, dict):
+                amenities = parsed_params.get("amenities", [])
+                if amenities:
+                    # Filter out empty amenities and format: q-KEYWORD_1-KEYWORD_2...
+                    valid_keywords = [k.strip().replace(" ", "-") for k in amenities if k.strip()]
+                    if valid_keywords:
+                        q_string = "-".join(["q"] + valid_keywords)
+                        # The URL format: .../bucuresti/q-keyword1-keyword2/?currency=EUR
+                        # We need to insert the q_string right before the query parameters
+                        if "?" in final_olx_url:
+                            base, query_str = final_olx_url.split("?", 1)
+                            # Ensure trailing slash on base before appending q_string
+                            base = base if base.endswith("/") else base + "/"
+                            # If there's already a q- parameter or other path elements we might need to be careful,
+                            # but normally it ends in /bucuresti/
+                            final_olx_url = f"{base}{q_string}/?{query_str}"
+                        else:
+                            base = final_olx_url if final_olx_url.endswith("/") else final_olx_url + "/"
+                            final_olx_url = f"{base}{q_string}/"
+            
+            with st.spinner(f"Scraping results from the web"):
                 df = run_pipeline(
-                    olx_url=scrape_config["olx_url"],
+                    olx_url=final_olx_url,
                     storia_url=scrape_config["storia_url"],
                     olx_pages=int(scrape_config["olx_pages"]),
                     storia_pages=int(scrape_config["storia_pages"]),
@@ -413,11 +434,7 @@ if st.session_state.page == "home":
             st.stop()
 
         # ── Ollama vibe parsing ──
-        parsed_params = None
-        parse_error   = None
-        if vibe.strip():
-            with st.spinner("✨ Parsing your vibe with Ollama..."):
-                parsed_params, parse_error = parse_vibe(vibe, model=model_choice)
+      
 
         st.session_state.search_params = {
             "vibe":          vibe,
@@ -490,8 +507,8 @@ elif st.session_state.page == "results":
             matches = df_f["_rooms_num"] == target
         df_f = df_f[~has_rooms | matches]
 
-    # Vibe filter
-    df_f = apply_vibe(df_f, params.get("vibe", ""))
+    # Vibe filter - Disabled as per user request to rely on smart URLs only
+    # df_f = apply_vibe(df_f, params.get("vibe", ""))
 
     # ── Count ──
     total, shown = len(df), len(df_f)
