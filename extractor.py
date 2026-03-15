@@ -235,7 +235,7 @@ def extract_storia(raw: dict) -> dict | None:
 # ─────────────────────────────────────────────
 #  Step 3 — Orchestration
 # ─────────────────────────────────────────────
-DB_NAME = "real_estate.db"
+DB_NAME = os.path.join(os.path.dirname(__file__), "Streamlit Interface", "real_estate.db")
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -255,6 +255,7 @@ def run_pipeline(
 ) -> pd.DataFrame:
     """
     Full end-to-end extraction with SQLite caching.
+    Yields intermediate state: (status_string, partial_dataframe)
     """
     # ── 0. Initialize DB ──────────────────────
     conn = init_db() # Assumes the init_db function provided earlier
@@ -265,7 +266,8 @@ def run_pipeline(
 
     if not all_found_links:
         print("⚠️ No links found to process.")
-        return pd.DataFrame()
+        yield "done", pd.DataFrame()
+        return
 
     # ── 2. Check Database for existing records ──
     # We query the DB to see which of these links we already have
@@ -282,12 +284,14 @@ def run_pipeline(
 
     print(f"📊 Cache: {len(df_cached)} found | 🚀 To Scrape: {len(olx_to_scrape)} OLX, {len(storia_to_scrape)} Storia")
 
+    # Yield the cached data immediately so the UI can display it
+    yield "db_cache", df_cached
+
     results_olx = []
     results_storia = []
 
     # ── 3a. Scrape OLX (New only) ──
-    def process_olx():
-        if not olx_to_scrape: return
+    if olx_to_scrape:
         print(f"\n🔶 Scraping {len(olx_to_scrape)} NEW OLX listings...")
         for link in tqdm(olx_to_scrape, desc="OLX", ncols=70):
             data = scrape_olx(link)
@@ -295,27 +299,26 @@ def run_pipeline(
                 # Ensure it fits your DB columns (rent vs price)
                 data['price'] = data.get('rent') 
                 results_olx.append(data)
+                yield "progress", pd.DataFrame([data])
             time.sleep(1.2)
 
     # ── 3b. Scrape Storia (New only) ──
-    def process_storia():
-        if not storia_to_scrape: return
+    if storia_to_scrape:
         print(f"\n🔷 Scraping {len(storia_to_scrape)} NEW Storia listings (batch={storia_batch})...")
         for i in tqdm(range(0, len(storia_to_scrape), storia_batch), desc="Storia batches", ncols=70):
             chunk  = storia_to_scrape[i : i + storia_batch]
             batch  = scrape_storia_batch(chunk)
             parsed = [extract_storia(r) for r in batch]
+            new_this_batch = []
             for p in parsed:
                 if p:
                     # Sync price/rent columns
                     p['rent'] = p.get('price') 
                     results_storia.append(p)
+                    new_this_batch.append(p)
+            if new_this_batch:
+                yield "progress", pd.DataFrame(new_this_batch)
             time.sleep(2)
-
-    # Run scrapers in parallel for new content
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        ex.submit(process_olx)
-        ex.submit(process_storia)
 
     # ── 4. Save New Data to DB ────────────────
     new_results = results_olx + results_storia
@@ -337,7 +340,7 @@ def run_pipeline(
     combined.to_csv(out_path, index=False, encoding="utf-8-sig")
     print(f"\n✅ Done. Total pipeline output: {len(combined)} listings.")
 
-    return combined
+    yield "done", combined
 
 
 # ─────────────────────────────────────────────
@@ -354,8 +357,8 @@ JOB = {
 }
 
 if __name__ == "__main__":
-    df = run_pipeline(**JOB)
-    # print(df[["platform", "title", "rent", "district"]].head(10).to_string())
+    for status, data in run_pipeline(**JOB):
+        print(f"Status: {status}, Extracted {len(data)} items.")
 
 
 
