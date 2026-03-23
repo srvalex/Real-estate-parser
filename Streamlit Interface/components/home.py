@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from utils import load_csv, to_storia_slug, to_olx_slug, parse_price, parse_rooms
 from components.results import render_property_cards
-from ollama_parser import parse_vibe, check_server
+from ollama_parser import parse_vibe, check_server, embed_listings, search_by_vibe
 
 def render_home(districts, proximity, server_url, data_dir):
     # Hero
@@ -160,24 +160,27 @@ def render_home(districts, proximity, server_url, data_dir):
             importlib.reload(extractor)
             from extractor import run_pipeline
             
-            final_olx_url = scrape_config["olx_urls"][0] if scrape_config["olx_urls"] else ""
             if parsed_params and isinstance(parsed_params, dict):
-                amenities = parsed_params.get("amenities", [])
-                if amenities:
-                    # Filter out empty amenities and format: q-KEYWORD_1-KEYWORD_2...
-                    valid_keywords = [k.strip().replace(" ", "-") for k in amenities if k.strip()]
+                url_filters = parsed_params.get("url_filters", [])
+                if url_filters:
+                    # Filter out empty url_filters and format: q-KEYWORD_1-KEYWORD_2...
+                    valid_keywords = [k.strip().replace(" ", "-") for k in url_filters if k.strip()]
                     if valid_keywords:
                         q_string = "-".join(["q"] + valid_keywords)
-                        # The URL format: .../bucuresti/q-keyword1-keyword2/?currency=EUR
-                        # We need to insert the q_string right before the query parameters
-                        if "?" in final_olx_url:
-                            base, query_str = final_olx_url.split("?", 1)
-                            # Ensure trailing slash on base before appending q_string
-                            base = base if base.endswith("/") else base + "/"
-                            final_olx_url = f"{base}{q_string}/?{query_str}"
-                        else:
-                            base = final_olx_url if final_olx_url.endswith("/") else final_olx_url + "/"
-                            final_olx_url = f"{base}{q_string}/"
+                        
+                        # Apply to all OLX urls
+                        new_olx_urls = []
+                        for url in scrape_config["olx_urls"]:
+                            if "?" in url:
+                                base, query_str = url.split("?", 1)
+                                base = base if base.endswith("/") else base + "/"
+                                new_olx_urls.append(f"{base}{q_string}/?{query_str}")
+                            else:
+                                base = url if url.endswith("/") else url + "/"
+                                new_olx_urls.append(f"{base}{q_string}/")
+                        scrape_config["olx_urls"] = new_olx_urls
+            
+            final_olx_url = scrape_config["olx_urls"][0] if scrape_config["olx_urls"] else ""
             
             with st.spinner(f"Scraping results from the web"):
                 storia_url = scrape_config["storia_urls"][0] if scrape_config["storia_urls"] else ""
@@ -212,10 +215,8 @@ def render_home(districts, proximity, server_url, data_dir):
                             render_property_cards(df)
                     
                     elif status == "done":
-                        if df is None or df.empty:
-                            df = partial_df
-                        else:
-                            df = pd.concat([df, partial_df], ignore_index=True)
+                        # Use the final combined dataframe directly
+                        df = partial_df
                         status_container.success(f"✅ Scraping completed! Total results: {len(df)}")
                         cache_preview.empty() # Clear preview since we move to results page
 
@@ -228,12 +229,67 @@ def render_home(districts, proximity, server_url, data_dir):
             st.error("No data source found. Upload a CSV or configure scraping.")
             st.stop()
 
+        # ── Embedding sort pass ────────────────────────────────────────────────
+        embedding_sorted = False
+        embed_error = None
+        vibe_terms  = (parsed_params or {}).get("vibe_terms", [])
+        url_filters = (parsed_params or {}).get("url_filters", [])
+
+        # Fallback: if the LLM server didn't return vibe_terms, use raw vibe words
+        if not vibe_terms and vibe.strip():
+            vibe_terms = [w.strip() for w in vibe.replace(",", " ").split() if len(w.strip()) > 2]
+
+        if vibe_terms and df is not None and not df.empty:
+            url_col = "url" if "url" in df.columns else ("link" if "link" in df.columns else None)
+            if url_col:
+                with st.spinner("🧠 Ranking listings by AI similarity…"):
+                    # Only send description + url — no hard/soft filter tagging on listing level
+                    rows_payload = [
+                        {
+                            "description":  str(row.get("description", "") or ""),
+                            "url":          str(row.get(url_col, "") or ""),
+                            "hard_filters": [],
+                            "soft_filters": [],
+                        }
+                        for _, row in df[[url_col, "description"]].fillna("").iterrows()
+                        if str(row.get("description", "")).strip()
+                    ]
+
+                    _, embed_error = embed_listings(rows_payload, server_url=server_url)
+
+                    # Cap limit to df size to avoid ChromaDB n_results > collection crash
+                    safe_limit = max(1, len(rows_payload))
+                    matches, search_error = search_by_vibe(
+                        vibe_terms=vibe_terms,
+                        limit=safe_limit,
+                        server_url=server_url,
+                    )
+                    if search_error and not embed_error:
+                        embed_error = search_error
+
+                if matches:
+                    score_map = {m["url"]: m["distance"] for m in matches}
+                    df["_similarity_score"] = df[url_col].map(score_map)
+                    df = df.sort_values(
+                        "_similarity_score",
+                        ascending=True,
+                        na_position="last",
+                    ).reset_index(drop=True)
+                    embedding_sorted = True
+                    st.toast(f"🎯 AI ranked {len(matches)} listings by similarity!", icon="🧠")
+                elif embed_error:
+                    st.warning(f"⚠️ AI ranking skipped: {embed_error}")
+                else:
+                    st.toast("⚠️ AI server returned no ranked results — showing unordered.", icon="⚠️")
+
+
         st.session_state.search_params = {
-            "vibe":          vibe,
-            "max_price":     max_price,
-            "rooms":         rooms,
-            "parsed_params": parsed_params,
-            "parse_error":   parse_error,
+            "vibe":             vibe,
+            "max_price":        max_price,
+            "rooms":            rooms,
+            "parsed_params":    parsed_params,
+            "parse_error":      parse_error,
+            "embedding_sorted": embedding_sorted,
         }
         st.session_state.df = df
         st.session_state.page = "results"

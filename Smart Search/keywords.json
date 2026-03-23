@@ -1,0 +1,35 @@
+{
+    "pet-friendly": [
+        "pet-friendly",
+        "accept animal de companie",
+        "animal de companie",
+        "animale de companie",
+        "petfriendly"
+    ],
+    "parcare": [
+        "loc de parcare inclus",
+        "garaj",
+        "parcare in apropiere",
+        "loc de parcare",
+        "parcare subterana"
+    ],
+    "gradina": [
+        "curte",
+        "gradina"
+    ],
+    "metrou": [
+        "metrou",
+        "metro"
+    ],
+    "centrala": [
+        "centrala",
+        "centrala propie"
+    ],
+    "renovat": [
+        "nou",
+        "renovat",
+        "utilat",
+        "mobilat",
+        "mobilat/utilat"
+    ]
+}

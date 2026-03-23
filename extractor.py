@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import os
+from firebase_utils import save_to_firestore, init_firebase
 
 # ─────────────────────────────────────────────
 #  Hardcoded request header
@@ -330,7 +331,15 @@ def run_pipeline(
         
         # Save to DB so we don't scrape them next time
         df_new.to_sql("listings", conn, if_exists="append", index=False)
-        print(f"💾 Added {len(df_new)} new records to database.")
+        print(f"💾 Added {len(df_new)} new records to local database.")
+
+        # --- 4b. Save New Data to Firestore (Cloud) ---
+        try:
+            # Convert NaN to None for Firestore compatibility
+            firestore_ready_data = df_new.where(pd.notnull(df_new), None).to_dict(orient='records')
+            save_to_firestore(firestore_ready_data)
+        except Exception as e:
+            print(f"⚠️ Failed to save to Firestore: {e}")
 
     # ── 5. Combine & Finalize ─────────────────
     combined = pd.concat([df_cached, df_new], ignore_index=True)

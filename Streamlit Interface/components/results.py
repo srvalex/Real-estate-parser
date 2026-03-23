@@ -5,7 +5,7 @@ from utils import safe_str, apply_vibe
 def render_results():
     params = st.session_state.search_params
     df: pd.DataFrame = st.session_state.get("df", pd.DataFrame())
-
+    
     # ── Top bar ──
     col_back, col_logo, col_vibe = st.columns([0.8, 1, 4])
     with col_back:
@@ -67,6 +67,18 @@ def render_results():
         unsafe_allow_html=True,
     )
 
+    # ── AI-sorted banner ────────────────────────────────────────────────
+    embedding_sorted = params.get("embedding_sorted", False)
+    if embedding_sorted:
+        st.markdown(
+            '<div style="background:linear-gradient(90deg,#7c3aed22,#a78bfa11);'
+            'border:1px solid #7c3aed55;border-radius:10px;padding:0.6rem 1rem;'
+            'margin-bottom:0.8rem;font-size:0.85rem;color:#a78bfa;">'
+            '🧠 Results ranked by <strong>AI similarity</strong> to your vibe — closest match first.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
     render_property_cards(df_f)
 
 def render_property_cards(df_f):
@@ -79,6 +91,7 @@ def render_property_cards(df_f):
         """, unsafe_allow_html=True)
     else:
         left, right = st.columns(2)
+        has_scores = "_similarity_score" in df_f.columns
 
         for i, (_, row) in enumerate(df_f.iterrows()):
             col = left if i % 2 == 0 else right
@@ -99,6 +112,28 @@ def render_property_cards(df_f):
                 loc_label = district or location[:30]
                 if loc_label: chips += f'<span class="meta-chip">📍 {loc_label}</span>'
 
+                # ── Similarity score badge ───────────────────────────────
+                score_badge = ""
+                if has_scores:
+                    raw_dist = row.get("_similarity_score")
+                    if raw_dist is not None and str(raw_dist) != "nan":
+                        # Cosine distance ∈ [0, 2]; convert to a 0–100 % match
+                        match_pct = max(0, round((1 - float(raw_dist) / 2) * 100))
+                        # Colour: green ≥ 70%, yellow ≥ 40%, muted otherwise
+                        if match_pct >= 70:
+                            colour = "#4ade80"   # green
+                        elif match_pct >= 40:
+                            colour = "#facc15"   # yellow
+                        else:
+                            colour = "#94a3b8"   # slate
+                        score_badge = (
+                            f'<span style="display:inline-block;vertical-align:middle;'
+                            f'background:{colour}22;color:{colour};'
+                            f'border:1px solid {colour}55;border-radius:6px;'
+                            f'padding:2px 10px;font-size:0.75rem;font-weight:600;">'
+                            f'🎯 {match_pct}% match</span>'
+                        )
+
                 plat_class = "olx" if "olx" in platform.lower() else ""
                 link_html  = f'<a class="card-link" href="{url}" target="_blank">View listing →</a>' if url else ""
                 desc_html  = desc[:400].replace("<", "&lt;").replace(">", "&gt;")
@@ -107,7 +142,7 @@ def render_property_cards(df_f):
                 <div class="prop-card">
                     <div class="card-platform {plat_class}">{platform}</div>
                     <div class="card-title">{title}</div>
-                    <div class="card-price">{price_disp}</div>
+                    <div class="card-price">{price_disp}&nbsp;&nbsp;{score_badge}</div>
                     <div class="card-meta">{chips}</div>
                     <div class="card-desc">{desc_html}</div>
                     {link_html}
