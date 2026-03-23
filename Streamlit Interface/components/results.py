@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from utils import safe_str, apply_vibe
+from utils import safe_str
 
 def render_results():
     params = st.session_state.search_params
@@ -21,16 +21,40 @@ def render_results():
 
     st.markdown("---")
 
-    # ── Parsed vibe JSON expander ──
-    parsed = params.get("parsed_params")
-    parse_err = params.get("parse_error")
-    if parsed:
-        with st.expander("🧠 How Ollama understood your vibe", expanded=True):
-            st.json(parsed)
-    elif parse_err:
-        with st.expander("⚠️ Ollama parsing note", expanded=True):
-            st.warning(parse_err)
-            st.caption("Search is still running using your raw text as keyword filter.")
+    # ── spaCy filters expander ──
+    spacy_filters = params.get("spacy_filters", {})
+    if spacy_filters:
+        LABEL_MAP = {
+            "ROOM_COUNT":           ("🛌", "camere"),
+            "LOCATION_SECTOR":      ("📍", "sector"),
+            "HAS_METRO":            ("🚇", "metrou"),
+            "HAS_PARKING":          ("🚗", "parcare"),
+            "PET_FRIENDLY":         ("🐾", "pet-friendly"),
+            "HAS_HEATING_UNIT":     ("🔥", "centrală"),
+            "HAS_BALCONY":          ("🌿", "balcon"),
+            "CONDITION_RENOVATED":  ("✨", "renovat"),
+            "STYLE_MODERN":         ("🏠", "modern"),
+            "FURNISHED":            ("🛋️", "mobilat"),
+            "FEAT_BRIGHT":          ("☀️", "luminos"),
+            "FEAT_QUIET":           ("🤫", "liniștit"),
+        }
+        with st.expander("🧠 Filters detected from your prompt", expanded=True):
+            pills = ""
+            for key, val in spacy_filters.items():
+                icon, label = LABEL_MAP.get(key, ("🔖", key))
+                display = f"{val}" if not isinstance(val, bool) else label
+                pills += (
+                    f'<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;'
+                    f'border:1px solid #7c3aed55;border-radius:20px;padding:3px 12px;'
+                    f'margin:3px;font-size:0.82rem;">'
+                    f'{icon} {display}</span>'
+                )
+            st.markdown(pills, unsafe_allow_html=True)
+
+    # ── Embedding error notice ──
+    embed_error = params.get("embed_error")
+    if embed_error:
+        st.warning(f"⚠️ AI ranking unavailable: {embed_error}", icon="⚠️")
 
     if df.empty:
         st.warning("No data loaded. Go back and try again.")

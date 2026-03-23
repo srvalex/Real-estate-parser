@@ -3,7 +3,8 @@ import os
 import pandas as pd
 from utils import load_csv, to_storia_slug, to_olx_slug, parse_price, parse_rooms
 from components.results import render_property_cards
-from ollama_parser import parse_vibe, check_server, embed_listings, search_by_vibe
+from ollama_parser import check_server, embed_listings, search_by_vibe
+from nlp_filters import extract_filters, get_olx_keywords
 
 def render_home(districts, proximity, server_url, data_dir):
     # Hero
@@ -134,11 +135,10 @@ def render_home(districts, proximity, server_url, data_dir):
 
             st.markdown('</div>', unsafe_allow_html=True)
 
-        parsed_params = None
-        parse_error   = None
+        # ── Instant local NLP extraction (no network call) ──
+        spacy_filters = {}
         if vibe.strip():
-            with st.spinner("Extraing keywords from your prompt"):
-                parsed_params, parse_error = parse_vibe(vibe, server_url=server_url)
+            spacy_filters = extract_filters(vibe)
         
     # Handle search
     if search_clicked:
@@ -160,25 +160,21 @@ def render_home(districts, proximity, server_url, data_dir):
             importlib.reload(extractor)
             from extractor import run_pipeline
             
-            if parsed_params and isinstance(parsed_params, dict):
-                url_filters = parsed_params.get("url_filters", [])
-                if url_filters:
-                    # Filter out empty url_filters and format: q-KEYWORD_1-KEYWORD_2...
-                    valid_keywords = [k.strip().replace(" ", "-") for k in url_filters if k.strip()]
-                    if valid_keywords:
-                        q_string = "-".join(["q"] + valid_keywords)
-                        
-                        # Apply to all OLX urls
-                        new_olx_urls = []
-                        for url in scrape_config["olx_urls"]:
-                            if "?" in url:
-                                base, query_str = url.split("?", 1)
-                                base = base if base.endswith("/") else base + "/"
-                                new_olx_urls.append(f"{base}{q_string}/?{query_str}")
-                            else:
-                                base = url if url.endswith("/") else url + "/"
-                                new_olx_urls.append(f"{base}{q_string}/")
-                        scrape_config["olx_urls"] = new_olx_urls
+            url_filters = get_olx_keywords(spacy_filters)
+
+            if url_filters:
+                # Build q-keyword1-keyword2 path segment for OLX URL
+                q_string = "q-" + "-".join(k.strip() for k in url_filters if k.strip())
+                new_olx_urls = []
+                for url in scrape_config["olx_urls"]:
+                    if "?" in url:
+                        base, query_str = url.split("?", 1)
+                        base = base if base.endswith("/") else base + "/"
+                        new_olx_urls.append(f"{base}{q_string}/?{query_str}")
+                    else:
+                        base = url if url.endswith("/") else url + "/"
+                        new_olx_urls.append(f"{base}{q_string}/")
+                scrape_config["olx_urls"] = new_olx_urls
             
             final_olx_url = scrape_config["olx_urls"][0] if scrape_config["olx_urls"] else ""
             
@@ -229,67 +225,74 @@ def render_home(districts, proximity, server_url, data_dir):
             st.error("No data source found. Upload a CSV or configure scraping.")
             st.stop()
 
-        # ── Embedding sort pass ────────────────────────────────────────────────
+        # ── Show results immediately, then rank with AI ────────────────────────
         embedding_sorted = False
-        embed_error = None
-        vibe_terms  = (parsed_params or {}).get("vibe_terms", [])
-        url_filters = (parsed_params or {}).get("url_filters", [])
+        embed_error      = None
+        matches          = []
+        url_col          = "url" if "url" in df.columns else ("link" if "link" in df.columns else None)
 
-        # Fallback: if the LLM server didn't return vibe_terms, use raw vibe words
-        if not vibe_terms and vibe.strip():
-            vibe_terms = [w.strip() for w in vibe.replace(",", " ").split() if len(w.strip()) > 2]
+        # Step 1 — render unscored cards right away so user isn't staring at a spinner
+        live_status = st.empty()
+        live_cards  = st.empty()
 
-        if vibe_terms and df is not None and not df.empty:
-            url_col = "url" if "url" in df.columns else ("link" if "link" in df.columns else None)
-            if url_col:
-                with st.spinner("🧠 Ranking listings by AI similarity…"):
-                    # Only send description + url — no hard/soft filter tagging on listing level
-                    rows_payload = [
-                        {
-                            "description":  str(row.get("description", "") or ""),
-                            "url":          str(row.get(url_col, "") or ""),
-                            "hard_filters": [],
-                            "soft_filters": [],
-                        }
-                        for _, row in df[[url_col, "description"]].fillna("").iterrows()
-                        if str(row.get("description", "")).strip()
-                    ]
+        live_status.info(f"⚡ Found **{len(df)}** listings — running AI ranking…")
+        with live_cards.container():
+            render_property_cards(df)
 
-                    _, embed_error = embed_listings(rows_payload, server_url=server_url)
+        # Step 2 — embed + search (Colab call, may take a few seconds)
+        if vibe.strip() and url_col:
+            rows_payload = [
+                {
+                    "description":  str(row.get("description", "") or ""),
+                    "url":          str(row.get(url_col, "") or ""),
+                    "hard_filters": [],
+                    "soft_filters": [],
+                }
+                for _, row in df[[url_col, "description"]].fillna("").iterrows()
+                if str(row.get("description", "")).strip()
+            ]
 
-                    # Cap limit to df size to avoid ChromaDB n_results > collection crash
-                    safe_limit = max(1, len(rows_payload))
-                    matches, search_error = search_by_vibe(
-                        vibe_terms=vibe_terms,
-                        limit=safe_limit,
-                        server_url=server_url,
-                    )
-                    if search_error and not embed_error:
-                        embed_error = search_error
+            _, embed_error = embed_listings(rows_payload, server_url=server_url)
 
-                if matches:
-                    score_map = {m["url"]: m["distance"] for m in matches}
-                    df["_similarity_score"] = df[url_col].map(score_map)
-                    df = df.sort_values(
-                        "_similarity_score",
-                        ascending=True,
-                        na_position="last",
-                    ).reset_index(drop=True)
-                    embedding_sorted = True
-                    st.toast(f"🎯 AI ranked {len(matches)} listings by similarity!", icon="🧠")
-                elif embed_error:
-                    st.warning(f"⚠️ AI ranking skipped: {embed_error}")
-                else:
-                    st.toast("⚠️ AI server returned no ranked results — showing unordered.", icon="⚠️")
+            safe_limit = max(1, len(rows_payload))
+            matches, search_error = search_by_vibe(
+                query=vibe,
+                limit=safe_limit,
+                server_url=server_url,
+            )
+            if search_error and not embed_error:
+                embed_error = search_error
 
+            # Step 3 — scores arrived: re-sort and update the live card grid
+            if matches:
+                score_map = {m["url"]: m["distance"] for m in matches}
+                df["_similarity_score"] = df[url_col].map(score_map)
+                df = df.sort_values(
+                    "_similarity_score",
+                    ascending=True,
+                    na_position="last",
+                ).reset_index(drop=True)
+                embedding_sorted = True
+
+                live_status.success(f"🎯 AI ranked **{len(matches)}** listings — navigating to results…")
+                with live_cards.container():
+                    render_property_cards(df)
+                import time; time.sleep(1.5)   # let user see ranked cards briefly
+
+            elif embed_error:
+                st.toast(f"⚠️ AI ranking skipped: {embed_error}", icon="⚠️")
+                live_status.warning("⚠️ AI server unreachable — showing unscored results.")
+            else:
+                st.toast("⚠️ AI server returned no ranked results.", icon="⚠️")
+                live_status.warning("⚠️ No AI scores returned — showing unordered results.")
 
         st.session_state.search_params = {
             "vibe":             vibe,
             "max_price":        max_price,
             "rooms":            rooms,
-            "parsed_params":    parsed_params,
-            "parse_error":      parse_error,
+            "spacy_filters":    spacy_filters,
             "embedding_sorted": embedding_sorted,
+            "embed_error":      embed_error,
         }
         st.session_state.df = df
         st.session_state.page = "results"
