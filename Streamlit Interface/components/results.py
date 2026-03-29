@@ -1,11 +1,114 @@
 import streamlit as st
 import pandas as pd
-from utils import safe_str
+import sys
+import importlib
+from utils import safe_str, apply_filters, prepare_dataframe, apply_ai_scores
+from nlp_filters import apply_description_filters
+
+# Static mapping from spaCy filter key → (icon, Romanian label)
+LABEL_MAP = {
+    "ROOM_COUNT":           ("🛌", "camere"),
+    "LOCATION_SECTOR":      ("📍", "sector"),
+    "HAS_METRO":            ("🚇", "metrou"),
+    "HAS_PARKING":          ("🚗", "parcare"),
+    "PET_FRIENDLY":         ("🐾", "pet-friendly"),
+    "HAS_HEATING_UNIT":     ("🔥", "centrală"),
+    "HAS_BALCONY":          ("🌿", "balcon"),
+    "CONDITION_RENOVATED":  ("✨", "renovat"),
+    "STYLE_MODERN":         ("🏠", "modern"),
+    "FURNISHED":            ("🛋️", "mobilat"),
+    "FEAT_BRIGHT":          ("☀️", "luminos"),
+    "FEAT_QUIET":           ("🤫", "liniștit"),
+}
+
+
+def _render_filter_pills(spacy_filters: dict):
+    """Render the detected-filter pills inside an expander."""
+    if not spacy_filters:
+        return
+    with st.expander("🧠 Filters detected from your prompt", expanded=True):
+        pills = ""
+        for key, val in spacy_filters.items():
+            icon, label = LABEL_MAP.get(key, ("🔖", key))
+            display = f"{val}" if not isinstance(val, bool) else label
+            pills += (
+                f'<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;'
+                f'border:1px solid #7c3aed55;border-radius:20px;padding:3px 12px;'
+                f'margin:3px;font-size:0.82rem;">'
+                f'{icon} {display}</span>'
+            )
+        st.markdown(pills, unsafe_allow_html=True)
+
+
+def _load_more(params: dict):
+    """Re-run the scrape pipeline for the next 2 pages and update session state."""
+    scrape_config = params["scrape_config"]
+    pages_scraped = params.get("pages_scraped", 1)
+    new_pages = pages_scraped + 2
+    vibe = params.get("vibe", "")
+    server_url = params.get("server_url", "")
+    data_dir = params.get("data_dir", "")
+
+    sys.path.insert(0, data_dir)
+    import extractor
+    importlib.reload(extractor)
+    from extractor import run_pipeline
+
+    final_olx_url = scrape_config["olx_urls"][0] if scrape_config.get("olx_urls") else ""
+    storia_url = scrape_config["storia_urls"][0] if scrape_config.get("storia_urls") else ""
+
+    status_box = st.empty()
+    df_final = pd.DataFrame()
+
+    with st.spinner(f"Fetching pages {pages_scraped + 1}–{new_pages}…"):
+        for status, partial_df in run_pipeline(
+            olx_url=final_olx_url,
+            storia_url=storia_url,
+            olx_pages=new_pages,
+            storia_pages=new_pages,
+            out_csv="results.csv",
+        ):
+            if status == "progress":
+                status_box.info(f"⏳ Scraping page {pages_scraped + 1}+…")
+            elif status == "done":
+                df_final = partial_df
+
+    if df_final.empty:
+        status_box.warning("No new results found on additional pages.")
+        return
+
+    df_final = prepare_dataframe(df_final)
+
+    spacy_filters = params.get("spacy_filters", {})
+    if spacy_filters:
+        df_final, excluded, _ = apply_description_filters(df_final, spacy_filters)
+
+    url_col = "url" if "url" in df_final.columns else ("link" if "link" in df_final.columns else None)
+
+    embedding_sorted, embed_error = False, None
+    if vibe.strip() and url_col:
+        df_final, embedding_sorted, embed_error = apply_ai_scores(df_final, vibe, server_url, url_col, spacy_filters=params.get("spacy_filters"))
+
+    params["pages_scraped"] = new_pages
+    params["embedding_sorted"] = embedding_sorted
+    params["embed_error"] = embed_error
+    st.session_state.search_params = params
+    st.session_state.df = df_final
+    status_box.success(f"✅ Updated: {len(df_final)} total listings")
+    st.rerun()
+
 
 def render_results():
     params = st.session_state.search_params
     df: pd.DataFrame = st.session_state.get("df", pd.DataFrame())
-    
+
+    # ── Auto-scrape if flagged ────────────────────────────────────────────────
+    if params.get("pending_scrape"):
+        params["pending_scrape"] = False
+        st.session_state.search_params = params
+        _load_more(params)
+        return  # _load_more calls st.rerun(), so this line is a safety guard
+
     # ── Top bar ──
     col_back, col_logo, col_vibe = st.columns([0.8, 1, 4])
     with col_back:
@@ -21,37 +124,8 @@ def render_results():
 
     st.markdown("---")
 
-    # ── spaCy filters expander ──
-    spacy_filters = params.get("spacy_filters", {})
-    if spacy_filters:
-        LABEL_MAP = {
-            "ROOM_COUNT":           ("🛌", "camere"),
-            "LOCATION_SECTOR":      ("📍", "sector"),
-            "HAS_METRO":            ("🚇", "metrou"),
-            "HAS_PARKING":          ("🚗", "parcare"),
-            "PET_FRIENDLY":         ("🐾", "pet-friendly"),
-            "HAS_HEATING_UNIT":     ("🔥", "centrală"),
-            "HAS_BALCONY":          ("🌿", "balcon"),
-            "CONDITION_RENOVATED":  ("✨", "renovat"),
-            "STYLE_MODERN":         ("🏠", "modern"),
-            "FURNISHED":            ("🛋️", "mobilat"),
-            "FEAT_BRIGHT":          ("☀️", "luminos"),
-            "FEAT_QUIET":           ("🤫", "liniștit"),
-        }
-        with st.expander("🧠 Filters detected from your prompt", expanded=True):
-            pills = ""
-            for key, val in spacy_filters.items():
-                icon, label = LABEL_MAP.get(key, ("🔖", key))
-                display = f"{val}" if not isinstance(val, bool) else label
-                pills += (
-                    f'<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;'
-                    f'border:1px solid #7c3aed55;border-radius:20px;padding:3px 12px;'
-                    f'margin:3px;font-size:0.82rem;">'
-                    f'{icon} {display}</span>'
-                )
-            st.markdown(pills, unsafe_allow_html=True)
+    _render_filter_pills(params.get("spacy_filters", {}))
 
-    # ── Embedding error notice ──
     embed_error = params.get("embed_error")
     if embed_error:
         st.warning(f"⚠️ AI ranking unavailable: {embed_error}", icon="⚠️")
@@ -61,25 +135,7 @@ def render_results():
         st.stop()
 
     # ── Apply filters ──
-    df_f = df.copy()
-
-    # Price filter
-    max_price = params.get("max_price", 0)
-    if max_price and max_price > 0:
-        has_price = df_f["_price_num"].notna()
-        under = df_f["_price_num"] <= max_price
-        df_f = df_f[~has_price | under]
-
-    # Rooms filter
-    sel_rooms = params.get("rooms", "Any")
-    if sel_rooms != "Any":
-        target = 4 if sel_rooms == "4+" else int(sel_rooms)
-        has_rooms = df_f["_rooms_num"].notna()
-        if sel_rooms == "4+":
-            matches = df_f["_rooms_num"] >= 4
-        else:
-            matches = df_f["_rooms_num"] == target
-        df_f = df_f[~has_rooms | matches]
+    df_f = apply_filters(df, params.get("max_price", 0), params.get("rooms", "Any"))
 
     # Vibe filter - Disabled as per user request to rely on smart URLs only
     # df_f = apply_vibe(df_f, params.get("vibe", ""))
@@ -104,6 +160,22 @@ def render_results():
         )
 
     render_property_cards(df_f)
+
+    # ── Load more ──────────────────────────────────────────────────────────────
+    scrape_config = params.get("scrape_config")
+    if scrape_config and scrape_config.get("olx_urls"):
+        pages_scraped = params.get("pages_scraped", 1)
+        st.markdown("---")
+        st.markdown(
+            f'<div style="text-align:center;color:#94a3b8;font-size:0.85rem;margin-bottom:0.5rem;">'
+            f'Showing results from page 1–{pages_scraped}. Want more?'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        _, btn_col, _ = st.columns([1, 2, 1])
+        with btn_col:
+            if st.button(f"🔄 Search pages {pages_scraped + 1}–{pages_scraped + 2}", use_container_width=True):
+                _load_more(params)
 
 def render_property_cards(df_f):
     if df_f.empty:
@@ -141,8 +213,8 @@ def render_property_cards(df_f):
                 if has_scores:
                     raw_dist = row.get("_similarity_score")
                     if raw_dist is not None and str(raw_dist) != "nan":
-                        # Cosine distance ∈ [0, 2]; convert to a 0–100 % match
-                        match_pct = max(0, round((1 - float(raw_dist) / 2) * 100))
+                        # _similarity_score is 0–1 (1 = best match)
+                        match_pct = round(float(raw_dist) * 100)
                         # Colour: green ≥ 70%, yellow ≥ 40%, muted otherwise
                         if match_pct >= 70:
                             colour = "#4ade80"   # green

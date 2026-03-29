@@ -9,6 +9,11 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stApp { background: #0d0f1a; }
 #MainMenu, footer, header { visibility: hidden; }
 
+/* ── Prevent Streamlit's running-state fade ── */
+[data-stale="true"], .stStale { opacity: 1 !important; transition: none !important; }
+.stSpinner > div { background: transparent !important; }
+.stApp > div { opacity: 1 !important; }
+
 /* ── Buttons ── */
 .stButton > button {
     background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;

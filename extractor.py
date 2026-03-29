@@ -109,6 +109,16 @@ def collect_storia_links(url: str, num_pages: int) -> list:
     return _flatten(pages)
 
 
+def _classify_link(link: str) -> tuple[str, str]:
+    """Return (platform, normalised_link) for a raw listing URL."""
+    domain = urlparse(link).netloc
+    if "olx.ro" in domain:
+        return "olx", link
+    elif "storia.ro" in domain:
+        return "storia", link.split(".html")[0]
+    return "unknown", link
+
+
 def build_links_df(olx_url=None, storia_url=None, olx_pages=1, storia_pages=1) -> pd.DataFrame:
     raw = []
     if olx_url:
@@ -121,17 +131,8 @@ def build_links_df(olx_url=None, storia_url=None, olx_pages=1, storia_pages=1) -
     raw += storia_raw
 
     offers = get_all_offers(raw)
-
-    def classify(link):
-        domain = urlparse(link).netloc
-        if "olx.ro" in domain:
-            return "olx", link
-        elif "storia.ro" in domain:
-            return "storia", link.split(".html")[0]
-        return "unknown", link
-
     df = pd.DataFrame({"link": offers})
-    df[["platform", "link"]] = df["link"].apply(lambda x: pd.Series(classify(x)))
+    df[["platform", "link"]] = df["link"].apply(lambda x: pd.Series(_classify_link(x)))
     df = df[df["platform"] != "unknown"].drop_duplicates("link").reset_index(drop=True)
     print(f"  Total unique links: {len(df)}")
     return df
@@ -238,12 +239,67 @@ def extract_storia(raw: dict) -> dict | None:
 # ─────────────────────────────────────────────
 DB_NAME = os.path.join(os.path.dirname(__file__), "Streamlit Interface", "real_estate.db")
 
+DB_COLS = (
+    "link TEXT PRIMARY KEY, id TEXT, platform TEXT, title TEXT, rent TEXT, "
+    "description TEXT, url TEXT, price TEXT, m TEXT, rooms_num TEXT, "
+    "building_type TEXT, floor_no TEXT, building_floors_num TEXT, "
+    "building_material TEXT, windows_type TEXT, heating TEXT, build_year TEXT, "
+    "construction_status TEXT, free_from TEXT, district TEXT, "
+    "location_full_name TEXT, features TEXT, deposit TEXT, "
+    "remote_services TEXT, scraped_at TEXT"
+)
+
 def init_db():
     conn = sqlite3.connect(DB_NAME)
-    # Define columns based on your header
-    cols = "link TEXT PRIMARY KEY, id TEXT, platform TEXT, title TEXT, rent TEXT, description TEXT, url TEXT, price TEXT, m TEXT, rooms_num TEXT, building_type TEXT, floor_no TEXT, building_floors_num TEXT, building_material TEXT, windows_type TEXT, heating TEXT, build_year TEXT, construction_status TEXT, free_from TEXT, district TEXT, location_full_name TEXT, features TEXT, deposit TEXT, remote_services TEXT, scraped_at TEXT"
-    conn.execute(f"CREATE TABLE IF NOT EXISTS listings ({cols})")
+    conn.execute(f"CREATE TABLE IF NOT EXISTS listings ({DB_COLS})")
     return conn
+
+
+def _evolve_schema(conn, df: pd.DataFrame):
+    """Add any columns present in df but missing from the SQLite table.
+    This lets the schema grow automatically when scrapers return new fields.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(listings)").fetchall()}
+    new_cols = [col for col in df.columns if col not in existing]
+    for col in new_cols:
+        conn.execute(f'ALTER TABLE listings ADD COLUMN "{col}" TEXT')
+        print(f"  [schema] Added new column: {col}")
+    if new_cols:
+        conn.commit()
+
+
+def _save_new_listings(new_results: list, conn) -> pd.DataFrame:
+    """Persist new listings to SQLite and Firestore. Returns a DataFrame of what was saved."""
+    if not new_results:
+        return pd.DataFrame()
+
+    df_new = pd.DataFrame(new_results)
+    df_new["scraped_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    _evolve_schema(conn, df_new)
+
+    try:
+        df_new.to_sql("listings", conn, if_exists="append", index=False)
+        print(f"💾 Added {len(df_new)} new records to local database.")
+    except Exception as e:
+        print(f"⚠️ Batch DB insert failed ({e}), retrying row by row…")
+        saved, failed = 0, 0
+        for _, row in df_new.iterrows():
+            try:
+                row.to_frame().T.to_sql("listings", conn, if_exists="append", index=False)
+                saved += 1
+            except Exception as row_err:
+                print(f"  [skip] {row.get('url', '?')}: {row_err}")
+                failed += 1
+        print(f"💾 Row-by-row: {saved} saved, {failed} skipped.")
+
+    try:
+        firestore_ready = df_new.where(pd.notnull(df_new), None).to_dict(orient="records")
+        save_to_firestore(firestore_ready)
+    except Exception as e:
+        print(f"⚠️ Failed to save to Firestore: {e}")
+
+    return df_new
 
 
 def run_pipeline(
@@ -321,25 +377,8 @@ def run_pipeline(
                 yield "progress", pd.DataFrame(new_this_batch)
             time.sleep(2)
 
-    # ── 4. Save New Data to DB ────────────────
-    new_results = results_olx + results_storia
-    df_new = pd.DataFrame()
-    
-    if new_results:
-        df_new = pd.DataFrame(new_results)
-        df_new["scraped_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Save to DB so we don't scrape them next time
-        df_new.to_sql("listings", conn, if_exists="append", index=False)
-        print(f"💾 Added {len(df_new)} new records to local database.")
-
-        # --- 4b. Save New Data to Firestore (Cloud) ---
-        try:
-            # Convert NaN to None for Firestore compatibility
-            firestore_ready_data = df_new.where(pd.notnull(df_new), None).to_dict(orient='records')
-            save_to_firestore(firestore_ready_data)
-        except Exception as e:
-            print(f"⚠️ Failed to save to Firestore: {e}")
+    # ── 4. Save New Data to DB & Firestore ───
+    df_new = _save_new_listings(results_olx + results_storia, conn)
 
     # ── 5. Combine & Finalize ─────────────────
     combined = pd.concat([df_cached, df_new], ignore_index=True)

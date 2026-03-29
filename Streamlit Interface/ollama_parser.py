@@ -81,6 +81,7 @@ def embed_listings(
 def search_by_vibe(
     query: str,
     limit: int = 50,
+    url_filters: List[str] = None,
     server_url: str = DEFAULT_SERVER_URL,
     timeout: int = 30,
 ) -> tuple[List[Dict], Optional[str]]:
@@ -89,9 +90,11 @@ def search_by_vibe(
     to the user's full prompt. Returns pure semantic ranking.
 
     Args:
-        query:      The complete raw user prompt string.
-        limit:      Max number of results to return.
-        server_url: Base ngrok URL of the Colab server.
+        query:       The complete raw user prompt string.
+        limit:       Max number of results to return.
+        url_filters: If provided, restrict the search to only these URLs.
+                     Pass the current zone's URLs so every listing gets a score.
+        server_url:  Base ngrok URL of the Colab server.
 
     Returns:
         (matches_list, error_string) — error_string is None on success.
@@ -105,8 +108,8 @@ def search_by_vibe(
         resp = requests.post(
             endpoint,
             json={
-                "vibe_terms":  [query],   # full prompt as single semantic query
-                "url_filters": [],        # no metadata filter — pure semantic ranking
+                "vibe_terms":  [query],
+                "url_filters": url_filters or [],
                 "limit":       limit,
             },
             timeout=timeout,

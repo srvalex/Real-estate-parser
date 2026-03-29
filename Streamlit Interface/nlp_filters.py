@@ -52,6 +52,94 @@ FILTER_TO_OLX_SLUG = {
 }
 
 
+# ── Description-level exclusion phrases (Romanian) ───────────────────────
+# If a listing description contains any of these, it explicitly denies the feature.
+EXCLUSION_PATTERNS = {
+    "PET_FRIENDLY": [
+        "nu acceptam animale", "nu acceptăm animale",
+        "nu se accepta animale", "nu se acceptă animale",
+        "nu se admit animale", "nu accepta animale",
+        "fara animale", "fără animale",
+        "animale nepermise", "animale nu sunt permise",
+        "nu este pet-friendly", "nu e pet-friendly",
+        "nu este pet friendly", "nu e pet friendly",
+        "no pets", "nu acceptam caini", "nu acceptăm câini",
+        "nu acceptam pisici", "nu acceptăm pisici",
+    ],
+    "HAS_PARKING": [
+        "fara loc de parcare", "fără loc de parcare",
+        "nu include parcare", "nu este inclusa parcarea",
+        "parcare neinclusa", "parcare neinclus",
+        "nu are parcare", "nu dispune de parcare",
+    ],
+    "HAS_BALCONY": [
+        "fara balcon", "fără balcon",
+        "nu are balcon", "nu dispune de balcon",
+    ],
+    "FURNISHED": [
+        "nemobilat", "fara mobila", "fără mobilă",
+        "nu este mobilat", "nu e mobilat",
+    ],
+    "HAS_HEATING_UNIT": [
+        "fara centrala", "fără centrală",
+        "nu are centrala", "nu are centrală",
+        "incalzire centrala de bloc",   # district heating ≠ own boiler
+    ],
+}
+
+# ── Positive confirmation phrases ─────────────────────────────────────────
+# If present in description, listing explicitly confirms the feature.
+CONFIRMATION_PATTERNS = {
+    "PET_FRIENDLY": [
+        "pet-friendly", "pet friendly", "acceptam animale",
+        "acceptăm animale", "animale acceptate", "animale de companie permise",
+        "acceptam catei", "acceptăm câini", "acceptam pisici",
+    ],
+    "HAS_PARKING": [
+        "loc de parcare", "parcare inclusa", "parcare inclusă",
+        "parcare proprie", "garaj inclus",
+    ],
+    "HAS_BALCONY": [
+        "balcon", "terasa", "terasă",
+    ],
+    "FURNISHED": [
+        "mobilat", "mobilată", "complet mobilat", "partial mobilat",
+    ],
+}
+
+
+def apply_description_filters(df, spacy_filters: dict):
+    """
+    Hard-exclude listings whose descriptions explicitly deny a requested feature.
+    Returns (filtered_df, excluded_count, summary_dict).
+
+    summary_dict maps filter_key → count of listings excluded by that filter.
+    """
+    import pandas as pd
+
+    if not spacy_filters or "description" not in df.columns:
+        return df, 0, {}
+
+    desc = df["description"].fillna("").str.lower()
+    keep = pd.Series(True, index=df.index)
+    summary = {}
+
+    for filter_key in spacy_filters:
+        patterns = EXCLUSION_PATTERNS.get(filter_key, [])
+        if not patterns:
+            continue
+        filter_mask = pd.Series(False, index=df.index)
+        for pattern in patterns:
+            filter_mask |= desc.str.contains(pattern, na=False, regex=False)
+        excluded = filter_mask.sum()
+        if excluded:
+            summary[filter_key] = int(excluded)
+        keep &= ~filter_mask
+
+    excluded_total = int((~keep).sum())
+    return df[keep].reset_index(drop=True), excluded_total, summary
+
+
 def extract_filters(text: str) -> dict:
     """
     Run spaCy NLP on the user prompt and return a dict of detected filters.

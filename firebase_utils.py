@@ -1,5 +1,7 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
+import hashlib
 import os
 import json
 
@@ -25,10 +27,16 @@ def init_firebase():
         print(f"❌ Error initializing Firebase Admin SDK: {e}")
         return None
 
+def _url_to_doc_id(url: str) -> str:
+    """Derive a stable, Firestore-safe document ID from a URL using an MD5 hash."""
+    return hashlib.md5(url.encode()).hexdigest()
+
+
 def save_to_firestore(data_list, collection_name='listings'):
     """
     Saves a list of dictionaries to Firestore.
-    Uses 'link' as the document ID for deduplication.
+    Uses an MD5 hash of the listing URL as the document ID so that
+    re-inserting the same URL is always an upsert, never a duplicate.
     """
     db = init_firebase()
     if db is None or not data_list:
@@ -38,18 +46,13 @@ def save_to_firestore(data_list, collection_name='listings'):
     doc_count = 0
 
     for item in data_list:
-        # We use the 'url' or 'link' as a unique ID to avoid duplicates in Firestore
-        # Since 'link' is often a full URL, we might need to sanitize it or just use it.
-        # Firestore IDs can be problematic with certain characters, but simple URLs are usually fine.
-        # However, extractor.py uses 'url' as the primary key-like field.
-        doc_id = item.get('id') or item.get('link')
-        if not doc_id:
-            doc_ref = db.collection(collection_name).document()
+        url = item.get('url') or item.get('link')
+        doc_id = _url_to_doc_id(url) if url else None
+
+        if doc_id:
+            doc_ref = db.collection(collection_name).document(doc_id)
         else:
-            # Firestore document IDs cannot contain /
-            # Let's use 'id' if possible, otherwise let Firebase generate one or sanitize link.
-            # actually, if we use the 'id' field from OLX/Storia, it's safer.
-            doc_ref = db.collection(collection_name).document(str(doc_id))
+            doc_ref = db.collection(collection_name).document()
 
         batch.set(doc_ref, item, merge=True)
         doc_count += 1
@@ -61,6 +64,22 @@ def save_to_firestore(data_list, collection_name='listings'):
 
     batch.commit()
     print(f"✅ Successfully saved {doc_count} records to Firestore collection '{collection_name}'.")
+
+def query_listings_by_district(district_names: list, collection_name='listings') -> list:
+    """Fetch all listings from Firestore whose district field matches any of the given neighborhoods.
+    Batches into chunks of 30 to stay within Firestore's 'in' query limit.
+    """
+    db = init_firebase()
+    if db is None or not district_names:
+        return []
+
+    results = []
+    for i in range(0, len(district_names), 30):
+        chunk = district_names[i:i + 30]
+        docs = db.collection(collection_name).where(filter=FieldFilter('district', 'in', chunk)).stream()
+        results.extend(doc.to_dict() for doc in docs)
+    return results
+
 
 def get_all_firestore_urls(collection_name='listings'):
     """Returns a set of all URLs currently stored in Firestore."""
