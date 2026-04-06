@@ -3,6 +3,7 @@ import pandas as pd
 import sys
 import importlib
 from utils import safe_str, apply_filters, prepare_dataframe, apply_ai_scores
+from local_embedder import embed_listings
 from nlp_filters import apply_description_filters
 
 # Static mapping from spaCy filter key → (icon, Romanian label)
@@ -40,13 +41,14 @@ def _render_filter_pills(spacy_filters: dict):
         st.markdown(pills, unsafe_allow_html=True)
 
 
-def _load_more(params: dict):
-    """Re-run the scrape pipeline for the next 2 pages and update session state."""
+def _load_more(params: dict, is_initial: bool = False):
+    """Re-run the scrape pipeline and update session state.
+    is_initial=True uses the user's original page selection;
+    is_initial=False (load-more button) adds 2 pages on top of what was scraped.
+    """
     scrape_config = params["scrape_config"]
     pages_scraped = params.get("pages_scraped", 1)
-    new_pages = pages_scraped + 2
-    vibe = params.get("vibe", "")
-    server_url = params.get("server_url", "")
+    new_pages = scrape_config.get("pages", 1) if is_initial else pages_scraped + 2
     data_dir = params.get("data_dir", "")
 
     sys.path.insert(0, data_dir)
@@ -54,47 +56,88 @@ def _load_more(params: dict):
     importlib.reload(extractor)
     from extractor import run_pipeline
 
-    final_olx_url = scrape_config["olx_urls"][0] if scrape_config.get("olx_urls") else ""
-    storia_url = scrape_config["storia_urls"][0] if scrape_config.get("storia_urls") else ""
+    # Build jobs with updated page count
+    jobs = [
+        {**job, "pages": new_pages}
+        for job in scrape_config.get("jobs", [])
+    ]
 
     status_box = st.empty()
-    df_final = pd.DataFrame()
+    cards_box  = st.empty()
+    df_running = pd.DataFrame()
+    df_final   = pd.DataFrame()
 
-    with st.spinner(f"Fetching pages {pages_scraped + 1}–{new_pages}…"):
-        for status, partial_df in run_pipeline(
-            olx_url=final_olx_url,
-            storia_url=storia_url,
-            olx_pages=new_pages,
-            storia_pages=new_pages,
-            out_csv="results.csv",
-        ):
-            if status == "progress":
-                status_box.info(f"⏳ Scraping page {pages_scraped + 1}+…")
-            elif status == "done":
-                df_final = partial_df
+    for status, partial_df in run_pipeline(
+        jobs=jobs,
+        out_csv="results.csv",
+    ):
+        if status in ("db_cache", "progress") and not partial_df.empty:
+            df_running = pd.concat([df_running, prepare_dataframe(partial_df)], ignore_index=True)
+            status_box.info(f"🕷️ {len(df_running)} listings found so far…")
+            with cards_box.container():
+                render_property_cards(apply_filters(df_running, params.get("max_price", 0), params.get("rooms", "Any")))
+        elif status == "done":
+            df_final = partial_df
 
     if df_final.empty:
-        status_box.warning("No new results found on additional pages.")
+        status_box.warning("No new results found.")
         return
 
     df_final = prepare_dataframe(df_final)
 
+    # ── Merge with cached results (Firestore) ────────────────────────────────
+    cached_df = st.session_state.get("df", pd.DataFrame())
+    new_count = 0
+    url_col_new = "url" if "url" in df_final.columns else ("link" if "link" in df_final.columns else None)
+
+    if not cached_df.empty:
+        url_col_cached = "url" if "url" in cached_df.columns else ("link" if "link" in cached_df.columns else None)
+        if url_col_cached and url_col_new and url_col_cached == url_col_new:
+            # Cached rows take priority; drop scraped duplicates
+            existing_urls = set(cached_df[url_col_cached].dropna())
+            df_new_only = df_final[~df_final[url_col_new].isin(existing_urls)]
+            df_final = pd.concat([cached_df, df_new_only], ignore_index=True)
+        else:
+            df_new_only = df_final
+            df_final = pd.concat([cached_df, df_final], ignore_index=True)
+
+        new_count = len(df_new_only)
+        status_box.info(f"🔀 Combined: {len(cached_df)} cached + {new_count} new = {len(df_final)} total")
+    else:
+        df_new_only = df_final
+
+    # ── Embed newly scraped listings into ChromaDB ───────────────────────────
+    if url_col_new and not df_new_only.empty and "description" in df_new_only.columns:
+        embed_payload = [
+            {
+                "description": str(row.get("description", "") or ""),
+                "url":         str(row.get(url_col_new, "") or ""),
+                "hard_filters": [],
+                "soft_filters": [],
+            }
+            for _, row in df_new_only[[url_col_new, "description"]].fillna("").iterrows()
+            if str(row.get("description", "")).strip() and str(row.get(url_col_new, "")).strip()
+        ]
+        if embed_payload:
+            with st.spinner(f"Embedding {len(embed_payload)} new listings into ChromaDB…"):
+                embed_listings(embed_payload)
+
     spacy_filters = params.get("spacy_filters", {})
     if spacy_filters:
-        df_final, excluded, _ = apply_description_filters(df_final, spacy_filters)
+        df_final, _, _ = apply_description_filters(df_final, spacy_filters)
 
-    url_col = "url" if "url" in df_final.columns else ("link" if "link" in df_final.columns else None)
-
-    embedding_sorted, embed_error = False, None
-    if vibe.strip() and url_col:
-        df_final, embedding_sorted, embed_error = apply_ai_scores(df_final, vibe, server_url, url_col, spacy_filters=params.get("spacy_filters"))
-
+    # Save merged (unranked) results and come back to rank on the next render
+    # so the user sees all listings before the AI re-ordering happens.
     params["pages_scraped"] = new_pages
-    params["embedding_sorted"] = embedding_sorted
-    params["embed_error"] = embed_error
+    params["embedding_sorted"] = False
+    params["embed_error"] = None
+    params["_pending_rerank"] = True
     st.session_state.search_params = params
     st.session_state.df = df_final
-    status_box.success(f"✅ Updated: {len(df_final)} total listings")
+    if new_count > 0:
+        st.session_state["_scrape_toast"] = f"✅ Scraping done — {new_count} new listings added"
+    else:
+        st.session_state["_scrape_toast"] = "ℹ️ Scraping done — no new listings found"
     st.rerun()
 
 
@@ -102,12 +145,17 @@ def render_results():
     params = st.session_state.search_params
     df: pd.DataFrame = st.session_state.get("df", pd.DataFrame())
 
-    # ── Auto-scrape if flagged ────────────────────────────────────────────────
-    if params.get("pending_scrape"):
+    # ── Show scrape-done notification if set by _load_more ───────────────────
+    toast_msg = st.session_state.pop("_scrape_toast", None)
+    if toast_msg:
+        st.toast(toast_msg)
+
+    # Consume the flag early so it doesn't re-trigger on the next rerun,
+    # but remember it so we can start the scrape at the bottom of the page.
+    pending_scrape = params.get("pending_scrape", False)
+    if pending_scrape:
         params["pending_scrape"] = False
         st.session_state.search_params = params
-        _load_more(params)
-        return  # _load_more calls st.rerun(), so this line is a safety guard
 
     # ── Top bar ──
     col_back, col_logo, col_vibe = st.columns([0.8, 1, 4])
@@ -128,17 +176,19 @@ def render_results():
 
     embed_error = params.get("embed_error")
     if embed_error:
-        st.warning(f"⚠️ AI ranking unavailable: {embed_error}", icon="⚠️")
+        st.warning(f"AI ranking unavailable: {embed_error}", icon="⚠️")
 
-    if df.empty:
+    if df.empty and not pending_scrape:
         st.warning("No data loaded. Go back and try again.")
         st.stop()
 
+    # ── Scrape-only: skip the empty card view, go straight to live scraping ──
+    if pending_scrape and df.empty:
+        _load_more(params, is_initial=True)
+        return
+
     # ── Apply filters ──
     df_f = apply_filters(df, params.get("max_price", 0), params.get("rooms", "Any"))
-
-    # Vibe filter - Disabled as per user request to rely on smart URLs only
-    # df_f = apply_vibe(df_f, params.get("vibe", ""))
 
     # ── Count ──
     total, shown = len(df), len(df_f)
@@ -160,6 +210,32 @@ def render_results():
         )
 
     render_property_cards(df_f)
+
+    # ── Cached+Scrape: show cached cards first, then trigger live scraping ────
+    if pending_scrape:
+        st.markdown("---")
+        _load_more(params, is_initial=True)
+        return
+
+    # ── Re-rank with AI after all results are visible ────────────────────────
+    if params.get("_pending_rerank") and params.get("vibe", "").strip():
+        params["_pending_rerank"] = False
+        st.session_state.search_params = params
+        vibe = params.get("vibe", "")
+        server_url = params.get("server_url", "")
+        url_col = "url" if "url" in df.columns else ("link" if "link" in df.columns else None)
+        if url_col:
+            with st.spinner("🧠 Re-ranking results by AI similarity…"):
+                df_ranked, embedding_sorted, embed_error = apply_ai_scores(
+                    df, vibe, server_url, url_col,
+                    skip_embed=True,
+                    spacy_filters=params.get("spacy_filters"),
+                )
+            params["embedding_sorted"] = embedding_sorted
+            params["embed_error"] = embed_error
+            st.session_state.search_params = params
+            st.session_state.df = df_ranked
+            st.rerun()
 
     # ── Load more ──────────────────────────────────────────────────────────────
     scrape_config = params.get("scrape_config")

@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import json
 import re
-from ollama_parser import embed_listings, search_by_vibe
+from local_embedder import embed_listings, search_by_vibe
 
 @st.cache_data
 def load_geo_data():
@@ -51,11 +51,14 @@ def load_csv(path: str) -> pd.DataFrame:
 
 def apply_filters(df: pd.DataFrame, max_price: int, sel_rooms: str) -> pd.DataFrame:
     """Apply price and room count filters to the listings DataFrame."""
-    if max_price and max_price > 0:
+    if df.empty:
+        return df
+
+    if max_price and max_price > 0 and "_price_num" in df.columns:
         has_price = df["_price_num"].notna()
         df = df[~has_price | (df["_price_num"] <= max_price)]
 
-    if sel_rooms != "Any":
+    if sel_rooms != "Any" and "_rooms_num" in df.columns:
         has_rooms = df["_rooms_num"].notna()
         if sel_rooms == "4+":
             df = df[~has_rooms | (df["_rooms_num"] >= 4)]

@@ -1,10 +1,17 @@
 import streamlit as st
 import os
+import sys
+
+# Must happen before importing home.py which imports scrapers
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..")
+if DATA_DIR not in sys.path:
+    sys.path.insert(0, DATA_DIR)
+
 from utils import load_geo_data
 from styles import inject_custom_css
 from components.home import render_home
 from components.results import render_results
-from ollama_parser import DEFAULT_SERVER_URL
+from local_embedder import DEFAULT_SERVER_URL
 
 # ─────────────────────────────────────────────
 #  Page config
@@ -24,7 +31,7 @@ inject_custom_css()
 # ─────────────────────────────────────────────
 #  Data helpers
 # ─────────────────────────────────────────────
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..")
+
 districts, proximity = load_geo_data()
 
 # ─────────────────────────────────────────────

@@ -2,10 +2,10 @@ import streamlit as st
 import os
 import pandas as pd
 import time
-from utils import prepare_dataframe, apply_filters, to_storia_slug, to_olx_slug, apply_ai_scores
+from utils import prepare_dataframe, apply_filters, apply_ai_scores
 from components.results import render_property_cards
-from ollama_parser import check_server
 from nlp_filters import extract_filters, get_olx_keywords, apply_description_filters
+from scrapers import SCRAPERS
 
 def _inject_olx_keywords(urls: list[str], keywords: list[str]) -> list[str]:
     """Insert a /q-keyword1-keyword2/ path segment into each OLX URL."""
@@ -55,19 +55,16 @@ def render_home(districts, proximity, server_url, data_dir):
             # ── Quick filters ──
             st.markdown('<div class="section-label">Filtre</div>', unsafe_allow_html=True)
 
-            c1, c2 = st.columns(2)
-            with c1:
-                max_price = st.number_input("Preț maxim (€/luna)", min_value=0, max_value=10000, value=0, step=50, help="Leave at 0 to skip")
-            with c2:
-                rooms = st.selectbox("Număr de camere", ["Any", "1", "2", "3", "4+"])
+            max_price = st.number_input("Preț maxim (€/luna)", min_value=0, max_value=10000, value=0, step=50, help="Leave at 0 to skip")
+            rooms = "Any"
 
             # ── Zone selector ──
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
             st.markdown('<div class="section-label">Select Locations</div>', unsafe_allow_html=True)
 
-            storia_urls = set()
-            olx_urls = set()
             final_selection = []
+            full_sectors = []          # district names where "select all" was checked
+            partial_by_sector = {}     # district_name → [selected neighbourhoods]
 
             for district_name, neighborhoods in districts.items():
                 sector_num = int(district_name.split(" ")[1])
@@ -84,59 +81,58 @@ def render_home(districts, proximity, server_url, data_dir):
                         )
 
                 if select_all:
+                    full_sectors.append(district_name)
                     final_selection.extend(neighborhoods)
-                    olx_id = (sector_num * 2) - 1
-                    olx_urls.add(f"https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/bucuresti/?currency=EUR&search%5Bdistrict_id%5D={olx_id}")
-                    storia_urls.add(f"https://www.storia.ro/ro/rezultate/inchiriere/apartament/bucuresti/sectorul-{sector_num}?ownerTypeSingleSelect=ALL&limit=48")
                 elif selected_in_district:
+                    partial_by_sector[district_name] = selected_in_district
                     final_selection.extend(selected_in_district)
-                    for n in selected_in_district:
-                        storia_urls.add(f"https://www.storia.ro/ro/rezultate/inchiriere/apartament/bucuresti/sectorul-{sector_num}/{to_storia_slug(n)}?ownerTypeSingleSelect=ALL&limit=48")
-                        olx_urls.add(f"https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/bucuresti/{to_olx_slug(n)}/?currency=EUR&search%5Bdistrict_id%5D={(sector_num * 2) - 1}")
 
-            # ── Proximity & Page Config ──
+            # ── Proximity ──
             use_proximity = st.toggle("🔍 Activare Proximity Search", value=False)
-
+            proximity_selection = []
             if use_proximity and final_selection:
                 for area in final_selection:
                     for neighbor in proximity.get(area, []):
-                        for d_name, d_list in districts.items():
-                            if neighbor in d_list:
-                                s_num = int(d_name.split(" ")[1])
-                                storia_urls.add(f"https://www.storia.ro/ro/rezultate/inchiriere/apartament/bucuresti/sectorul-{s_num}/{to_storia_slug(neighbor)}?ownerTypeSingleSelect=ALL&limit=48")
-                                olx_urls.add(f"https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/bucuresti/{to_olx_slug(neighbor)}/?currency=EUR&search%5Bdistrict_id%5D={(s_num * 2) - 1}")
+                        if neighbor not in final_selection and neighbor not in proximity_selection:
+                            proximity_selection.append(neighbor)
 
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-            sc1, sc2 = st.columns(2)
-            with sc1:
-                olx_pages = st.number_input("OLX pages", min_value=1, max_value=5, value=1)
-            with sc2:
-                storia_pages = st.number_input("Storia pages", min_value=1, max_value=5, value=1)
+            pages = st.number_input("Pages per site", min_value=1, max_value=5, value=1)
 
-            if max_price > 0:
-                storia_urls = {url + f"&priceMax={max_price}" for url in storia_urls}
-                olx_urls = {url + f"&search%5Bfilter_float_price:to%5D={max_price}" for url in olx_urls}
+            # ── Build search URLs via scraper registry ────────────────────────
+            scrape_jobs = []
+            for scraper in SCRAPERS.values():
+                urls = set(scraper.build_search_urls(final_selection, districts, max_price, full_sectors=full_sectors, partial_by_sector=partial_by_sector))
+                if proximity_selection:
+                    # Proximity neighbours always get per-neighbourhood URLs
+                    urls |= set(scraper.build_search_urls(
+                        proximity_selection, districts, max_price, per_neighbourhood=True
+                    ))
+                scrape_jobs.append({
+                    "platform_id": scraper.platform_id,
+                    "urls":        list(urls),
+                    "pages":       pages,
+                })
+            scrape_config = {"jobs": scrape_jobs, "pages": pages}
 
-            scrape_config = {
-                "storia_urls": list(storia_urls),
-                "olx_urls": list(olx_urls),
-                "olx_pages": olx_pages,
-                "storia_pages": storia_pages
-            }
+            # ── Debug: show generated URLs as toasts ──────────────────────────
+            with st.expander("🔗 Generated search URLs", expanded=False):
+                for job in scrape_jobs:
+                    st.markdown(f"**{job['platform_id'].upper()}** — {len(job['urls'])} URL(s)")
+                    for url in job["urls"]:
+                        st.code(url, language=None)
 
-            live_scrape = st.toggle("🕷️ Include live scraping", value=False,
-                                    help="Off = instant results from saved database. On = also scrapes the web for new listings.")
+            search_mode = st.radio(
+                "Search mode",
+                options=["⚡ Cached", "🔀 Cached + Scrape", "🕷️ Scrape only"],
+                index=0,
+                horizontal=True,
+                help="Cached = instant results from saved database · Scrape only = live scrape, no cache · Both = combine",
+            )
+            live_scrape = search_mode != "⚡ Cached"
+            scrape_only = search_mode == "🕷️ Scrape only"
 
-            # ── Colab server URL (Hardcoded) ──
-            @st.cache_data(ttl=30, show_spinner=False)
-            def _check_server_cached(url):
-                return check_server(url)
-
-            is_online = _check_server_cached(server_url)
-            if is_online:
-                st.caption("✅ Server is reachable")
-            else:
-                st.caption("⚠️ Server not reachable — make sure Colab is running and DEFAULT_SERVER_URL in ollama_parser.py is currently updated.")
+            st.caption("✅ Local AI model ready")
 
             st.markdown('<br>', unsafe_allow_html=True)
 
@@ -164,29 +160,54 @@ def render_home(districts, proximity, server_url, data_dir):
 
         df = None
 
-        # ── Fast path: query Firestore ──────────────────────────────────────
-        with st.spinner("⚡ Loading listings from database…"):
-            from firebase_utils import query_listings_by_district
-            records = query_listings_by_district(final_selection)
-
-        if records:
-            df = prepare_dataframe(pd.DataFrame(records))
-            df = apply_filters(df, max_price, rooms)
-            st.toast(f"⚡ {len(df)} listings loaded from database", icon="✅")
-        else:
-            st.warning("No saved listings found for the selected zones. Falling back to live scraping.")
-
-        # ── Prepare scrape config with keyword injection (used later if live_scrape) ──
-        if live_scrape and scrape_config.get("olx_urls"):
+        # ── Inject OLX keywords into scrape jobs ─────────────────────────────
+        if live_scrape:
             url_filters = get_olx_keywords(spacy_filters)
             if url_filters:
-                scrape_config["olx_urls"] = _inject_olx_keywords(scrape_config["olx_urls"], url_filters)
+                for job in scrape_config.get("jobs", []):
+                    if job["platform_id"] == "olx":
+                        job["urls"] = _inject_olx_keywords(job["urls"], url_filters)
 
-        if df is None or df.empty:
+        # ── Fast path: query Firestore (skipped in scrape-only mode) ─────────
+        if not scrape_only:
+            with st.spinner("⚡ Loading listings from database…"):
+                from firebase_utils import query_listings_by_district
+                records = query_listings_by_district(final_selection)
+
+            if records:
+                df = prepare_dataframe(pd.DataFrame(records))
+                df = apply_filters(df, max_price, rooms)
+                st.toast(f"⚡ {len(df)} listings loaded from database", icon="✅")
+            else:
+                st.warning("No saved listings found for the selected zones. Falling back to live scraping.")
+
+        if not scrape_only and (df is None or df.empty):
             st.error("No listings found. Try different zones or enable live scraping.")
             st.stop()
 
-        # ── Description-level hard exclusions ────────────────────────────────
+        embedding_sorted = False
+        embed_error      = None
+
+        if scrape_only:
+            # Navigate straight to results — scraping and ranking happen there
+            st.session_state.search_params = {
+                "vibe":             vibe,
+                "max_price":        max_price,
+                "rooms":            rooms,
+                "spacy_filters":    spacy_filters,
+                "embedding_sorted": False,
+                "embed_error":      None,
+                "scrape_config":    scrape_config,
+                "pages_scraped":    scrape_config.get("pages", 1) if scrape_config else 0,
+                "server_url":       server_url,
+                "data_dir":         data_dir,
+                "pending_scrape":   True,
+            }
+            st.session_state.df = pd.DataFrame()
+            st.session_state.page = "results"
+            st.rerun()
+
+        # ── Cached / Cached+Scrape: show results immediately then rank ────────
         if spacy_filters:
             df, excluded_count, exclusion_summary = apply_description_filters(df, spacy_filters)
             if excluded_count:
@@ -196,10 +217,7 @@ def render_home(districts, proximity, server_url, data_dir):
                 reasons = ", ".join(labels.get(k, k) for k in exclusion_summary)
                 st.toast(f"🚫 {excluded_count} listings removed ({reasons})", icon="🚫")
 
-        # ── Show results immediately, then rank with AI ────────────────────────
-        embedding_sorted = False
-        embed_error      = None
-        url_col          = "url" if "url" in df.columns else ("link" if "link" in df.columns else None)
+        url_col = "url" if "url" in df.columns else ("link" if "link" in df.columns else None)
 
         live_status = st.empty()
         live_cards  = st.empty()
@@ -209,7 +227,7 @@ def render_home(districts, proximity, server_url, data_dir):
             render_property_cards(df)
 
         if vibe.strip() and url_col:
-            df, embedding_sorted, embed_error = apply_ai_scores(df, vibe, server_url, url_col, skip_embed=not live_scrape, spacy_filters=spacy_filters)
+            df, embedding_sorted, embed_error = apply_ai_scores(df, vibe, server_url, url_col, skip_embed=True, spacy_filters=spacy_filters)
 
             if embedding_sorted:
                 live_status.success(f"🎯 AI ranked **{len(df)}** listings — navigating to results…")
@@ -218,9 +236,8 @@ def render_home(districts, proximity, server_url, data_dir):
                 time.sleep(1.5)
             elif embed_error:
                 st.toast(f"⚠️ AI ranking skipped: {embed_error}", icon="⚠️")
-                live_status.warning("⚠️ AI server unreachable — showing unscored results.")
+                live_status.warning("⚠️ AI ranking unavailable — showing unscored results.")
             else:
-                st.toast("⚠️ AI server returned no ranked results.", icon="⚠️")
                 live_status.warning("⚠️ No AI scores returned — showing unordered results.")
 
         st.session_state.search_params = {
@@ -231,10 +248,10 @@ def render_home(districts, proximity, server_url, data_dir):
             "embedding_sorted": embedding_sorted,
             "embed_error":      embed_error,
             "scrape_config":    scrape_config,
-            "pages_scraped":    scrape_config.get("olx_pages", 1) if scrape_config else 0,
+            "pages_scraped":    scrape_config.get("pages", 1) if scrape_config else 0,
             "server_url":       server_url,
             "data_dir":         data_dir,
-            "pending_scrape":   live_scrape and bool(scrape_config and scrape_config.get("olx_urls")),
+            "pending_scrape":   live_scrape and bool(scrape_config and any(j["urls"] for j in scrape_config.get("jobs", []))),
         }
         st.session_state.df = df
         st.session_state.page = "results"

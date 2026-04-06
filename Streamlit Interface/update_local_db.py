@@ -7,11 +7,13 @@ into the 'inside' real_estate.db (in the current folder).
 
 import sqlite3
 import os
-
-import sqlite3
-import os
+import sys
 import pandas as pd
 from firebase_utils import init_firebase
+
+# Reuse the canonical schema definition from the extractor
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from extractor import DB_COLS
 
 def sync_databases():
     # ... (existing code for local sync)
@@ -28,8 +30,7 @@ def sync_databases():
     conn_inside = sqlite3.connect(inside_db_path)
 
     try:
-        cols = "link TEXT PRIMARY KEY, id TEXT, platform TEXT, title TEXT, rent TEXT, description TEXT, url TEXT, price TEXT, m TEXT, rooms_num TEXT, building_type TEXT, floor_no TEXT, building_floors_num TEXT, building_material TEXT, windows_type TEXT, heating TEXT, build_year TEXT, construction_status TEXT, free_from TEXT, district TEXT, location_full_name TEXT, features TEXT, deposit TEXT, remote_services TEXT, scraped_at TEXT"
-        conn_inside.execute(f"CREATE TABLE IF NOT EXISTS listings ({cols})")
+        conn_inside.execute(f"CREATE TABLE IF NOT EXISTS listings ({DB_COLS})")
 
         outside_cursor = conn_outside.cursor()
         outside_cursor.execute("SELECT * FROM listings")
