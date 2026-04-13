@@ -1,0 +1,24 @@
+# Databases
+properties.db
+real_estate.db
+
+# Firebase credentials (secrets)
+real-estate-parser-f44a0-firebase-adminsdk-fbsvc-56cddcced1.json
+
+# Raw/processed data files
+Date OLX.csv
+Date Storia Procesate.csv
+Date Storia Raw.json
+results.csv
+grok_keywords.txt
+
+# Python cache
+__pycache__/
+Streamlit Interface/__pycache__/
+
+# Scratch / raw data dirs
+stored data/
+others/
+
+# Local ChromaDB vector store
+chroma db/my_local_db/

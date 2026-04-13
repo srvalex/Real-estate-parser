@@ -6,3 +6,4 @@ json
 time
 tqdm
 curl_cffi
+firebase-admin

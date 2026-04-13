@@ -60,15 +60,31 @@ async def fetch_url(context, url):
     page = await context.new_page()
     # OPTIMIZATION: Block images and css to save 70% bandwidth/time
     await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
-    
+
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        raw_json = await page.evaluate('() => document.getElementById("__NEXT_DATA__").textContent')
-        full_data = json.loads(raw_json)
-        offer_data = full_data.get('props', {}).get('pageProps', {}).get('ad', {})
-        return {"url": url, "status": "success", "data": offer_data}
+
+        # Fast path: try to extract __NEXT_DATA__ (present on live listings)
+        try:
+            raw_json = await page.evaluate('() => document.getElementById("__NEXT_DATA__").textContent')
+            full_data = json.loads(raw_json)
+            offer_data = full_data.get('props', {}).get('pageProps', {}).get('ad', {})
+            return {"url": url, "status": "success", "data": offer_data}
+        except Exception:
+            pass
+
+        # __NEXT_DATA__ missing — check whether Storia explicitly marks this as expired
+        content = await page.content()
+        if 'data-sentry-element="ExpiredAdContentLayout"' in content:
+            return {"url": url, "status": "expired", "data": {}}
+
+        # Page loaded but no data and no expired marker → request was blocked or
+        # page structure changed; treat as transient — will be retried next run.
+        return {"url": url, "status": "blocked", "message": "no __NEXT_DATA__ and no expired marker"}
+
     except Exception as e:
-        return {"url": url, "status": "error", "message": str(e)}
+        # Playwright-level failure (timeout, navigation error) → blocked / transient
+        return {"url": url, "status": "blocked", "message": str(e)}
     finally:
         await page.close()
 

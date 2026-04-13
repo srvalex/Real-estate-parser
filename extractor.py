@@ -1,307 +1,258 @@
 """
 extractor.py
 ────────────
-Standalone extraction pipeline for real estate listings.
+Platform-agnostic extraction pipeline.
 
-Usage (from project root):
-    python extractor.py
+Platform-specific logic lives entirely in scrapers/.
+Adding a new source = add a scraper there; this file never changes.
 
-Input is configured via the `JOB` dict at the bottom of this file.
-Output is a CSV saved to the project root.
+run_pipeline() accepts a list of scrape jobs:
+    jobs = [
+        {"platform_id": "olx",    "urls": [...], "pages": 1},
+        {"platform_id": "storia",  "urls": [...], "pages": 1},
+    ]
 """
 
-from bs4 import BeautifulSoup
-import pandas as pd
 import json
+import pandas as pd
 import time
-import subprocess
 import sqlite3
 from tqdm import tqdm
-from curl_cffi import requests
-from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import os
+from firebase_utils import save_to_firestore
+from scrapers import SCRAPERS
+from scrapers.storia import StoriaScraper
+from scrapers.imobiliare import ImobiliareRoScraper
 
 # ─────────────────────────────────────────────
-#  Hardcoded request header
-# ─────────────────────────────────────────────
-HEADER = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "Accept-Language": "ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-}
-
-# ─────────────────────────────────────────────
-#  Step 1 — Fetch & collect listing links
+#  Database
 # ─────────────────────────────────────────────
 
-def get_content(url: str) -> str | None:
+DB_NAME = os.path.join(os.path.dirname(__file__), "Streamlit Interface", "real_estate.db")
+
+DB_COLS = (
+    "url TEXT PRIMARY KEY, platform_id TEXT, platform TEXT, source_id TEXT, "
+    "title TEXT, price_eur TEXT, rent TEXT, price TEXT, description TEXT, "
+    "district TEXT, location_full_name TEXT, rooms TEXT, area_sqm TEXT, "
+    "features TEXT, scraped_at TEXT"
+)
+
+
+def init_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_NAME)
+    conn.execute(f"CREATE TABLE IF NOT EXISTS listings ({DB_COLS})")
+    return conn
+
+
+def _evolve_schema(conn: sqlite3.Connection, df: pd.DataFrame):
+    """Add columns present in df but missing from the SQLite table."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(listings)").fetchall()}
+    new_cols = [col for col in df.columns if col not in existing]
+    for col in new_cols:
+        conn.execute(f'ALTER TABLE listings ADD COLUMN "{col}" TEXT')
+        print(f"  [schema] Added column: {col}")
+    if new_cols:
+        conn.commit()
+
+
+def _save_new_listings(new_results: list, conn: sqlite3.Connection) -> pd.DataFrame:
+    """Persist new listings to SQLite and Firestore. Returns saved DataFrame."""
+    if not new_results:
+        return pd.DataFrame()
+
+    # Serialize image_urls (list[dict]) → JSON string for SQLite column storage.
+    # Preserve the original lists so Firestore receives native arrays.
+    original_images = {}
+    for item in new_results:
+        if "image_urls" in item and isinstance(item["image_urls"], list):
+            original_images[item.get("url", "")] = item["image_urls"]
+            item["image_urls"] = json.dumps(item["image_urls"], ensure_ascii=False)
+
+    df_new = pd.DataFrame(new_results)
+    df_new["scraped_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    _evolve_schema(conn, df_new)
+
     try:
-        response = requests.get(url, headers=HEADER, impersonate="chrome120")
-        response.raise_for_status()
-        return response.text
+        df_new.to_sql("listings", conn, if_exists="append", index=False)
+        print(f"💾 Saved {len(df_new)} new records to SQLite.")
     except Exception as e:
-        print(f"  [fetch error] {url}: {e}")
-        return None
+        print(f"⚠️ Batch insert failed ({e}), retrying row by row…")
+        saved, failed = 0, 0
+        for _, row in df_new.iterrows():
+            try:
+                row.to_frame().T.to_sql("listings", conn, if_exists="append", index=False)
+                saved += 1
+            except Exception as row_err:
+                print(f"  [skip] {row.get('url', '?')}: {row_err}")
+                failed += 1
+        print(f"💾 Row-by-row: {saved} saved, {failed} skipped.")
 
+    # Restore original image_urls lists for Firestore (native array support)
+    try:
+        firestore_records = df_new.where(pd.notnull(df_new), None).to_dict(orient="records")
+        for rec in firestore_records:
+            url = rec.get("url", "")
+            if url in original_images:
+                rec["image_urls"] = original_images[url]
+        save_to_firestore(firestore_records)
+    except Exception as e:
+        print(f"⚠️ Firestore save failed: {e}")
 
-def get_olx_listings(url: str):
-    html = get_content(url)
-    if not html:
-        return []
-    soup = BeautifulSoup(html, "html.parser")
-    return soup.find_all("div", attrs={"data-cy": "l-card"})
-
-
-def get_storia_listings(url: str):
-    html = get_content(url)
-    if not html:
-        return []
-    soup = BeautifulSoup(html, "html.parser")
-    return soup.find_all("div", attrs={"data-sentry-element": "ContentContainer"})
-
-
-def get_all_offers(raw_listings: list) -> list[str]:
-    offers = []
-    for listing in raw_listings:
-        anchor = listing.find("a", href=True)
-        if anchor:
-            href = anchor["href"]
-            if href.startswith("https"):       # OLX → Storia redirect
-                offers.append(href)
-            elif href.startswith("/d/o"):      # OLX native
-                offers.append("https://www.olx.ro" + href)
-            else:                              # Storia
-                offers.append("https://www.storia.ro" + href)
-    return offers
-
-
-def _flatten(lst):
-    return [item for batch in lst for item in batch]
-
-
-def collect_olx_links(url: str, num_pages: int) -> list:
-    if num_pages == 1:
-        return get_olx_listings(url)
-    pages = []
-    for n in range(1, num_pages + 1):
-        paged_url = url if n == 1 else f"{url}?page={n}"
-        pages.append(get_olx_listings(paged_url))
-    return _flatten(pages)
-
-
-def collect_storia_links(url: str, num_pages: int) -> list:
-    if num_pages == 1:
-        return get_storia_listings(url)
-    pages = []
-    for n in range(1, num_pages + 1):
-        paged_url = url if n == 1 else f"{url}&page={n}"
-        pages.append(get_storia_listings(paged_url))
-    return _flatten(pages)
-
-
-def build_links_df(olx_url=None, storia_url=None, olx_pages=1, storia_pages=1) -> pd.DataFrame:
-    print("📡 Collecting listing links...")
-    raw = []
-    if olx_url:
-        raw += collect_olx_links(olx_url, olx_pages)
-        print(f"  OLX: found {len(raw)} raw cards")
-    storia_raw = []
-    if storia_url:
-        storia_raw = collect_storia_links(storia_url, storia_pages)
-        print(f"  Storia: found {len(storia_raw)} raw cards")
-    raw += storia_raw
-
-    offers = get_all_offers(raw)
-
-    def classify(link):
-        domain = urlparse(link).netloc
-        if "olx.ro" in domain:
-            return "olx", link
-        elif "storia.ro" in domain:
-            return "storia", link.split(".html")[0]
-        return "unknown", link
-
-    df = pd.DataFrame({"link": offers})
-    df[["platform", "link"]] = df["link"].apply(lambda x: pd.Series(classify(x)))
-    df = df[df["platform"] != "unknown"].drop_duplicates("link").reset_index(drop=True)
-    print(f"  Total unique links: {len(df)}")
-    return df
+    return df_new
 
 
 # ─────────────────────────────────────────────
-#  Step 2 — Scrape individual listings
-# ─────────────────────────────────────────────
-
-def scrape_olx(url: str) -> dict | None:
-    try:
-        html = get_content(url)
-        soup = BeautifulSoup(html, "html.parser")
-
-        title = soup.find("div", attrs={"data-cy": "offer_title"}).find("h4").get_text(strip=True)
-        price = soup.find("div", attrs={"data-testid": "ad-price-container"}).find("h3").get_text(strip=True)
-
-        desc_container = soup.find("div", attrs={"data-cy": "ad_description"})
-        for tag in desc_container.find_all(["style", "h3"]):
-            tag.decompose()
-        description = desc_container.get_text(separator="\n", strip=True)
-
-        listing_id = soup.find("div", attrs={"data-cy": "ad-footer-bar-section"}).find("span").contents[2]
-
-        return {
-            "id":          str(listing_id).strip(),
-            "platform":    "OLX",
-            "title":       title,
-            "rent":        price,
-            "description": description,
-            "url":         url,
-        }
-    except Exception as e:
-        print(f"  [olx parse error] {url}: {e}")
-        return None
-
-
-def scrape_storia_batch(urls: list[str]) -> list[dict]:
-    """Call get_rendered_description.py as a subprocess (handles JS rendering)."""
-    if not urls:
-        return []
-    script = os.path.join(os.path.dirname(__file__), "get_rendered_description.py")
-    try:
-        proc = subprocess.Popen(
-            ["python", script] + urls,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-        )
-        stdout, stderr = proc.communicate()
-        if stdout.strip():
-            return json.loads(stdout.strip())
-        else:
-            print(f"  [storia batch error] {stderr[:200]}")
-            return []
-    except Exception as e:
-        print(f"  [storia subprocess error] {e}")
-        return []
-
-
-def extract_storia(raw: dict) -> dict | None:
-    """Flatten raw Storia JSON into a flat dict."""
-    data = raw.get("data") if isinstance(raw, dict) and "data" in raw else raw
-    if not data or not isinstance(data, dict):
-        return None
-    try:
-        chars = {"id": data.get("id"), "platform": "Storia"}
-        for el in data.get("characteristics", []):
-            chars[el["key"]] = el.get("localizedValue")
-
-        locs = data.get("location", {}).get("reverseGeocoding", {}).get("locations", [])
-        chars["district"]           = locs[-1].get("name", "Unknown") if locs else "Unknown"
-        chars["location_full_name"] = locs[-1].get("fullName", "Unknown") if locs else "Unknown"
-
-        desc_raw = data.get("description", "")
-        if desc_raw:
-            soup = BeautifulSoup(desc_raw, "html.parser")
-            chars["description"] = "\n".join(
-                line.strip() for line in soup.get_text(separator="\n").splitlines() if line.strip()
-            )
-        else:
-            chars["description"] = ""
-
-        chars["title"]    = data.get("title", "")
-        chars["url"]      = data.get("url", raw.get("url", ""))
-        chars["features"] = str(data.get("features", []))
-        return chars
-    except Exception as e:
-        print(f"  [storia extract error] {e}")
-        return None
-
-
-# ─────────────────────────────────────────────
-#  Step 3 — Orchestration
+#  Pipeline
 # ─────────────────────────────────────────────
 
 def run_pipeline(
-    olx_url:      str | None = None,
-    storia_url:   str | None = None,
-    olx_pages:    int = 1,
-    storia_pages: int = 1,
-    storia_batch: int = 5,
-    out_csv:      str = "results.csv",
-) -> pd.DataFrame:
+    jobs: list[dict],
+    out_csv: str = "results.csv",
+):
     """
-    Full end-to-end extraction.
-    Returns a combined DataFrame and saves it to `out_csv`.
+    Full extraction pipeline. Platform-agnostic.
+    Yields (status, partial_df):
+        "db_cache"  → rows already in SQLite for the requested URLs
+        "progress"  → each freshly scraped listing or batch
+        "done"      → final combined DataFrame
+
+    Args:
+        jobs: list of dicts, each with keys:
+              platform_id (str), urls (list[str]), pages (int)
     """
+    conn = init_db()
 
-    # ── 1. Collect links ──────────────────────
-    links_df = build_links_df(olx_url, storia_url, olx_pages, storia_pages)
+    # ── 1. Collect all listing links across all platforms ─────────────────────
+    all_links: list[tuple[str, str]] = []   # (url, platform_id)
+    for job in jobs:
+        scraper = SCRAPERS.get(job["platform_id"])
+        if not scraper:
+            print(f"  [warning] Unknown platform: {job['platform_id']}, skipping.")
+            continue
+        for search_url in job["urls"]:
+            links = scraper.collect_links(search_url, job.get("pages", 1))
+            all_links.extend((link, job["platform_id"]) for link in links)
 
-    olx_links    = links_df[links_df["platform"] == "olx"]["link"].tolist()
-    storia_links = links_df[links_df["platform"] == "storia"]["link"].tolist()
+    # Deduplicate by URL
+    seen = set()
+    unique_links = []
+    for url, pid in all_links:
+        if url not in seen:
+            seen.add(url)
+            unique_links.append((url, pid))
 
-    results_olx    = []
-    results_storia = []
+    if not unique_links:
+        print("⚠️ No links found.")
+        yield "done", pd.DataFrame()
+        return
 
-    # ── 2a. Scrape OLX (sequential, polite) ──
-    def process_olx():
-        print(f"\n🔶 Scraping {len(olx_links)} OLX listings...")
-        for link in tqdm(olx_links, desc="OLX", ncols=70):
-            data = scrape_olx(link)
-            if data:
-                results_olx.append(data)
-            time.sleep(1.2)
+    all_urls = [url for url, _ in unique_links]
+    print(f"  Total unique links: {len(all_urls)}")
 
-    # ── 2b. Scrape Storia (batched via Playwright) ──
-    def process_storia():
-        print(f"\n🔷 Scraping {len(storia_links)} Storia listings (batch={storia_batch})...")
-        for i in tqdm(range(0, len(storia_links), storia_batch), desc="Storia batches", ncols=70):
-            chunk  = storia_links[i : i + storia_batch]
-            batch  = scrape_storia_batch(chunk)
-            parsed = [extract_storia(r) for r in batch]
-            results_storia.extend(r for r in parsed if r)
-            time.sleep(2)
+    # ── 2. Check SQLite cache ─────────────────────────────────────────────────
+    placeholders = ", ".join(["?"] * len(all_urls))
+    df_cached = pd.read_sql_query(
+        f"SELECT * FROM listings WHERE url IN ({placeholders})",
+        conn, params=all_urls,
+    )
+    cached_urls = set(df_cached["url"].tolist())
+    print(f"📊 Cache: {len(df_cached)} found | To scrape: {len(all_urls) - len(cached_urls)}")
 
-    # Run both in parallel
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        ex.submit(process_olx)
-        ex.submit(process_storia)
+    yield "db_cache", df_cached
 
-    # ── 3. Combine & save ────────────────────
-    df_olx    = pd.DataFrame(results_olx)    if results_olx    else pd.DataFrame()
-    df_storia = pd.DataFrame(results_storia) if results_storia else pd.DataFrame()
-    combined  = pd.concat([df_olx, df_storia], ignore_index=True)
+    # ── 3. Scrape new listings, grouped by platform ───────────────────────────
+    # Re-classify each URL by domain ownership — OLX search pages can contain
+    # redirect links pointing to Storia, so the collector's platform_id may
+    # not match the actual URL domain.
+    def _owner(url: str) -> str:
+        for sid, s in SCRAPERS.items():
+            if s.owns_url(url):
+                return sid
+        return "unknown"
 
-    combined["scraped_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    to_scrape: dict[str, list[str]] = {}
+    for url, _ in unique_links:
+        if url not in cached_urls:
+            pid = _owner(url)
+            if pid != "unknown":
+                to_scrape.setdefault(pid, []).append(url)
+            else:
+                print(f"  [skip] No scraper owns URL: {url}")
+
+    all_new = []
+
+    for pid, urls in to_scrape.items():
+        scraper = SCRAPERS[pid]
+
+        # Batch scrapers (Storia, Imobiliare) use subprocess rendering
+        if isinstance(scraper, (StoriaScraper, ImobiliareRoScraper)):
+            print(f"\n🔷 Scraping {len(urls)} new {scraper.display_name} listings…")
+            for i in tqdm(range(0, len(urls), scraper.BATCH_SIZE), desc=scraper.display_name, ncols=70):
+                chunk = urls[i: i + scraper.BATCH_SIZE]
+                batch = scraper.scrape_batch(chunk)
+                if batch:
+                    all_new.extend(batch)
+                    # Only yield live listings to the UI — tombstones have no display data
+                    live = [r for r in batch if r.get("is_available", 1) == 1]
+                    if live:
+                        yield "progress", pd.DataFrame(live)
+                time.sleep(2)
+
+        # All other platforms: one listing at a time
+        else:
+            print(f"\n🔶 Scraping {len(urls)} new {scraper.display_name} listings…")
+            for url in tqdm(urls, desc=scraper.display_name, ncols=70):
+                result = scraper.scrape_listing_with_status(url)
+                status = result.get("status")
+                if status == "success":
+                    data = result["data"]
+                    data["is_available"] = 1
+                    all_new.append(data)
+                    yield "progress", pd.DataFrame([data])
+                elif status == "expired":
+                    # Write a minimal tombstone row so reruns skip this URL
+                    all_new.append({
+                        "url":          url,
+                        "platform_id":  pid,
+                        "is_available": 0,
+                        "scraped_at":   datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    })
+                # blocked → don't write anything, will be retried next scrape
+                time.sleep(1.2)
+
+    # ── 4. Save & finalize ────────────────────────────────────────────────────
+    df_new = _save_new_listings(all_new, conn)
+    combined = pd.concat([df_cached, df_new], ignore_index=True)
+    conn.close()
 
     out_path = os.path.join(os.path.dirname(__file__), out_csv)
     combined.to_csv(out_path, index=False, encoding="utf-8-sig")
-    print(f"\n✅ Done. {len(combined)} listings saved → {out_path}")
+    print(f"\n✅ Done. Total: {len(combined)} listings.")
 
-    return combined
+    yield "done", combined
 
 
 # ─────────────────────────────────────────────
-#  Entry point — configure your job here
+#  Entry point
 # ─────────────────────────────────────────────
-
-JOB = {
-    "olx_url":    "https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/bucuresti/?currency=EUR",
-    "storia_url": "https://www.storia.ro/ro/rezultate/inchiriere/apartament/bucuresti?ownerTypeSingleSelect=ALL",
-    "olx_pages":    1,
-    "storia_pages": 1,
-    "storia_batch": 5,          # how many Storia tabs open at once
-    "out_csv":    "results.csv", # saved next to this script
-}
 
 if __name__ == "__main__":
-    df = run_pipeline(**JOB)
-    print(df[["platform", "title", "rent", "district"]].head(10).to_string())
+    from scrapers import SCRAPERS
+    import json
+
+    with open("districts.json", encoding="utf-8") as f:
+        districts = json.load(f)
+
+    jobs = []
+    for scraper in SCRAPERS.values():
+        urls = scraper.build_search_urls(
+            selected_neighbourhoods=[n for ns in districts.values() for n in ns],
+            districts=districts,
+            max_price=0,
+        )
+        jobs.append({"platform_id": scraper.platform_id, "urls": urls, "pages": 1})
+
+    for status, data in run_pipeline(jobs):
+        print(f"[{status}] {len(data)} rows")
