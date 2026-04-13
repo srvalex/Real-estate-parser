@@ -13,8 +13,10 @@ No other file needs to change.
 
 from .olx import OLXScraper
 from .storia import StoriaScraper
+from .imobiliare import ImobiliareRoScraper
 
 SCRAPERS: dict = {
-    "olx":    OLXScraper(),
-    "storia": StoriaScraper(),
+    "olx":         OLXScraper(),
+    "storia":      StoriaScraper(),
+    "imobiliare":  ImobiliareRoScraper(),
 }

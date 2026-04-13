@@ -31,8 +31,6 @@ class OLXScraper(PlatformScraper):
         partial_by_sector = partial_by_sector or {}
 
         if per_neighbourhood:
-            # Proximity additions: flat list, generate one URL per neighbourhood.
-            # Map each name back to its first matching sector for the district_id.
             name_to_sector = {}
             for district_name, neighbourhoods in districts.items():
                 for n in neighbourhoods:
@@ -103,11 +101,49 @@ class OLXScraper(PlatformScraper):
 
     # ── Individual listing ────────────────────────────────────────────────────
 
-    def scrape_listing(self, url: str) -> dict | None:
-        try:
-            html = get_content(url)
-            soup = BeautifulSoup(html, "html.parser")
+    # Status constants — same convention as the Storia scraper
+    STATUS_OK      = "success"
+    STATUS_EXPIRED = "expired"
+    STATUS_BLOCKED = "blocked"
 
+    def scrape_listing(self, url: str) -> dict | None:
+        """Convenience wrapper — returns parsed dict or None (legacy callers)."""
+        result = self.scrape_listing_with_status(url)
+        if result["status"] == self.STATUS_OK:
+            return result["data"]
+        return None
+
+    def scrape_listing_with_status(self, url: str) -> dict:
+        """
+        Fetch and parse a single OLX listing.
+        Returns a dict with:
+          status: "success" | "expired" | "blocked"
+          data:   parsed listing dict (only present when status == "success")
+
+        Expired detection (two signals):
+          1. HTTP 410 Gone — OLX's canonical response for removed listings.
+          2. data-testid="ad-inactive-msg" in the HTML — shown when OLX serves
+             a soft-deleted page with a 200 instead of 410.
+        """
+        from curl_cffi import requests as cffi_requests
+        from scrapers.http import HEADERS
+        try:
+            response = cffi_requests.get(url, headers=HEADERS, impersonate="chrome120")
+            if response.status_code == 410:
+                return {"url": url, "status": self.STATUS_EXPIRED}
+            if response.status_code != 200:
+                return {"url": url, "status": self.STATUS_BLOCKED}
+            html = response.text
+        except Exception:
+            return {"url": url, "status": self.STATUS_BLOCKED}
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Soft-deleted: page loads with 200 but shows inactive banner
+        if soup.find(attrs={"data-testid": "ad-inactive-msg"}):
+            return {"url": url, "status": self.STATUS_EXPIRED}
+
+        try:
             title = soup.find("div", attrs={"data-cy": "offer_title"}).find("h4").get_text(strip=True)
             price = soup.find("div", attrs={"data-testid": "ad-price-container"}).find("h3").get_text(strip=True)
 
@@ -121,24 +157,28 @@ class OLXScraper(PlatformScraper):
                 .find("span").contents[2]
             ).strip()
 
-            # ── Image extraction ──────────────────────────────────────────
             image_urls = self._extract_images(soup)
 
             return {
-                "platform_id": self.platform_id,
-                "platform":    self.display_name,   # kept for backward compat with DB
-                "source_id":   source_id,
-                "url":         url,
-                "title":       title,
-                "price_eur":   price,
-                "rent":        price,                # backward compat
-                "price":       price,                # backward compat
-                "description": description,
-                "image_urls":  image_urls,
+                "url":    url,
+                "status": self.STATUS_OK,
+                "data": {
+                    "platform_id": self.platform_id,
+                    "platform":    self.display_name,
+                    "source_id":   source_id,
+                    "url":         url,
+                    "title":       title,
+                    "price_eur":   price,
+                    "rent":        price,
+                    "price":       price,
+                    "description": description,
+                    "image_urls":  image_urls,
+                },
             }
         except Exception as e:
             print(f"  [olx parse error] {url}: {e}")
-            return None
+            # Page loaded but parsing failed — treat as blocked (structure changed)
+            return {"url": url, "status": self.STATUS_BLOCKED}
 
     @staticmethod
     def _extract_images(soup: BeautifulSoup) -> list[dict]:
@@ -158,7 +198,6 @@ class OLXScraper(PlatformScraper):
             if not full_src:
                 continue
 
-            # Parse srcset → {width: url}
             srcset_map = {}
             srcset_raw = img.get("srcset", "")
             if srcset_raw:
@@ -168,9 +207,6 @@ class OLXScraper(PlatformScraper):
                     if len(parts) == 2:
                         srcset_map[parts[1]] = parts[0]
 
-            # Map to normalized keys (thumbnail/small/medium/large)
-            # OLX srcset widths: 420w → thumbnail, 780w → small, 992w → medium
-            # src → large (full resolution)
             images.append({
                 "thumbnail": srcset_map.get("420w", ""),
                 "small":     srcset_map.get("780w", ""),

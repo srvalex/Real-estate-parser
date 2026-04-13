@@ -2,10 +2,18 @@ import streamlit as st
 import os
 import sys
 
-# Must happen before importing home.py which imports scrapers
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Project root (scrapers/, extractor.py, firebase_utils.py)
+DATA_DIR = os.path.join(_HERE, "..")
 if DATA_DIR not in sys.path:
     sys.path.insert(0, DATA_DIR)
+
+# Streamlit Interface subfolders
+for _sub in ("embedders", "pipeline", "static"):
+    _p = os.path.join(_HERE, _sub)
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from utils import load_geo_data
 from styles import inject_custom_css

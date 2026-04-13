@@ -76,7 +76,12 @@ def query_listings_by_district(district_names: list, collection_name='listings')
     results = []
     for i in range(0, len(district_names), 30):
         chunk = district_names[i:i + 30]
-        docs = db.collection(collection_name).where(filter=FieldFilter('district', 'in', chunk)).stream()
+        docs = (
+            db.collection(collection_name)
+            .where(filter=FieldFilter('district', 'in', chunk))
+            .where(filter=FieldFilter('is_available', '==', 1))
+            .stream()
+        )
         results.extend(doc.to_dict() for doc in docs)
     return results
 

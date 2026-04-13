@@ -23,6 +23,7 @@ import os
 from firebase_utils import save_to_firestore
 from scrapers import SCRAPERS
 from scrapers.storia import StoriaScraper
+from scrapers.imobiliare import ImobiliareRoScraper
 
 # ─────────────────────────────────────────────
 #  Database
@@ -185,25 +186,40 @@ def run_pipeline(
     for pid, urls in to_scrape.items():
         scraper = SCRAPERS[pid]
 
-        # Storia uses batch scraping via subprocess
-        if isinstance(scraper, StoriaScraper):
+        # Batch scrapers (Storia, Imobiliare) use subprocess rendering
+        if isinstance(scraper, (StoriaScraper, ImobiliareRoScraper)):
             print(f"\n🔷 Scraping {len(urls)} new {scraper.display_name} listings…")
             for i in tqdm(range(0, len(urls), scraper.BATCH_SIZE), desc=scraper.display_name, ncols=70):
                 chunk = urls[i: i + scraper.BATCH_SIZE]
                 batch = scraper.scrape_batch(chunk)
                 if batch:
                     all_new.extend(batch)
-                    yield "progress", pd.DataFrame(batch)
+                    # Only yield live listings to the UI — tombstones have no display data
+                    live = [r for r in batch if r.get("is_available", 1) == 1]
+                    if live:
+                        yield "progress", pd.DataFrame(live)
                 time.sleep(2)
 
         # All other platforms: one listing at a time
         else:
             print(f"\n🔶 Scraping {len(urls)} new {scraper.display_name} listings…")
             for url in tqdm(urls, desc=scraper.display_name, ncols=70):
-                data = scraper.scrape_listing(url)
-                if data:
+                result = scraper.scrape_listing_with_status(url)
+                status = result.get("status")
+                if status == "success":
+                    data = result["data"]
+                    data["is_available"] = 1
                     all_new.append(data)
                     yield "progress", pd.DataFrame([data])
+                elif status == "expired":
+                    # Write a minimal tombstone row so reruns skip this URL
+                    all_new.append({
+                        "url":          url,
+                        "platform_id":  pid,
+                        "is_available": 0,
+                        "scraped_at":   datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    })
+                # blocked → don't write anything, will be retried next scrape
                 time.sleep(1.2)
 
     # ── 4. Save & finalize ────────────────────────────────────────────────────

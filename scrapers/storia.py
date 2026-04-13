@@ -118,20 +118,33 @@ class StoriaScraper(PlatformScraper):
     def scrape_batch(self, urls: list[str]) -> list[dict]:
         """
         Render and parse a batch of Storia listing pages via subprocess.
-        Returns a list of normalised dicts (failures are silently dropped).
+        Returns a list of dicts — each has an 'is_available' field:
+          1  = live listing, fully parsed
+          0  = confirmed expired (ExpiredAdContentLayout detected)
+        Blocked/error entries are silently dropped (retried next scrape).
         """
         raw_results = self._fetch_batch_raw(urls)
         parsed = []
         for r in raw_results:
-            p = self._parse_raw(r)
-            if p:
-                parsed.append(p)
+            status = r.get("status", "blocked")
+            if status == "expired":
+                parsed.append({
+                    "url":          r.get("url", ""),
+                    "platform_id":  self.platform_id,
+                    "is_available": 0,
+                })
+            elif status == "success":
+                p = self._parse_raw(r)
+                if p:
+                    p["is_available"] = 1
+                    parsed.append(p)
+            # blocked → drop silently
         return parsed
 
     def _fetch_batch_raw(self, urls: list[str]) -> list[dict]:
         if not urls:
             return []
-        script = os.path.join(os.path.dirname(__file__), "..", "get_rendered_description.py")
+        script = os.path.join(os.path.dirname(__file__), "..", "scripts", "get_rendered_description.py")
         try:
             proc = subprocess.Popen(
                 ["python", script],
