@@ -21,6 +21,7 @@ for _sub in ("embedders", "pipeline", "static"):
 _pw_marker = os.path.join(os.path.expanduser("~"), ".cache", ".pw_chromium_installed")
 if not os.path.exists(_pw_marker):
     subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+    os.makedirs(os.path.dirname(_pw_marker), exist_ok=True)
     open(_pw_marker, "w").close()
 
 from utils import load_geo_data
