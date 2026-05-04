@@ -1,10 +1,11 @@
 import streamlit as st
 import os
 import sys
+import subprocess
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
-# Project root (scrapers/, extractor.py, firebase_utils.py)
+# Project root (scrapers/, extractor.py, db_utils.py)
 DATA_DIR = os.path.join(_HERE, "..")
 if DATA_DIR not in sys.path:
     sys.path.insert(0, DATA_DIR)
@@ -15,10 +16,18 @@ for _sub in ("embedders", "pipeline", "static"):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+# Install Playwright browser on first boot (Streamlit Community Cloud doesn't run
+# `playwright install` automatically — packages.txt only covers system libs).
+_pw_marker = os.path.join(os.path.expanduser("~"), ".cache", ".pw_chromium_installed")
+if not os.path.exists(_pw_marker):
+    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+    open(_pw_marker, "w").close()
+
 from utils import load_geo_data
 from styles import inject_custom_css
 from components.home import render_home
 from components.results import render_results
+from components.analytics import render_analytics
 from local_embedder import DEFAULT_SERVER_URL
 
 # ─────────────────────────────────────────────
@@ -57,3 +66,5 @@ if st.session_state.page == "home":
     render_home(districts, proximity, DEFAULT_SERVER_URL, DATA_DIR)
 elif st.session_state.page == "results":
     render_results()
+elif st.session_state.page == "analytics":
+    render_analytics()

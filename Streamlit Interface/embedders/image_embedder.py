@@ -13,6 +13,33 @@ import os
 import requests
 import streamlit as st
 
+
+def _auth_header(url: str) -> dict:
+    """Return an Authorization header with a Google ID token for the given URL.
+
+    Resolves GOOGLE_APPLICATION_CREDENTIALS relative to the project root so the
+    path works regardless of where Streamlit is launched from.
+    """
+    key_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if not key_path:
+        return {}
+    if not os.path.isabs(key_path):
+        _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        key_path = os.path.join(_root, key_path)
+    if not os.path.exists(key_path):
+        return {}
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport import requests as ga_requests
+        creds = service_account.IDTokenCredentials.from_service_account_file(
+            key_path, target_audience=url
+        )
+        creds.refresh(ga_requests.Request())
+        return {"Authorization": f"Bearer {creds.token}"}
+    except Exception as e:
+        print(f"  [image-embedder] ID token error: {e}", flush=True)
+        return {}
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE           = os.path.dirname(os.path.abspath(__file__))
 CHROMA_DB_PATH  = os.path.join(_HERE, "..", "..", "ChromaDB")
@@ -33,9 +60,10 @@ def _load_collection():
 
 
 def check_image_server(server_url: str, timeout: int = 5) -> bool:
-    """Return True if the Colab CLIP server is reachable."""
+    """Return True if the embedding service is reachable and authenticated."""
     try:
-        resp = requests.get(f"{server_url.rstrip('/')}/health", timeout=timeout)
+        url = server_url.rstrip("/")
+        resp = requests.get(f"{url}/health", headers=_auth_header(url), timeout=timeout)
         return resp.status_code == 200
     except Exception:
         return False
@@ -118,6 +146,7 @@ def embed_cover_photos(df, server_url: str) -> tuple[int, str | None]:
             resp = requests.post(
                 f"{server_url}/embed",
                 json={"urls": image_urls},
+                headers=_auth_header(server_url),
                 timeout=120,
             )
             resp.raise_for_status()
@@ -219,6 +248,7 @@ def embed_all_photos(df, server_url: str) -> tuple[int, str | None]:
             resp = requests.post(
                 f"{server_url}/embed",
                 json={"urls": photo_urls},
+                headers=_auth_header(server_url),
                 timeout=120,
             )
             resp.raise_for_status()
@@ -331,6 +361,28 @@ def search_by_image_embedding(embedding: list[float], limit: int = 3000) -> tupl
     d_range = (max_d - min_d) if max_d > min_d else 1.0
     score_map = {url: 1.0 - (d - min_d) / d_range for url, d in listing_distances.items()}
     return score_map, None
+
+
+def clip_encode_text(text: str) -> list[float] | None:
+    """Encode a text string with the local CLIP text tower → 512-dim embedding.
+
+    Used in apply_ai_scores to encode the user's vibe prompt before querying
+    the Supabase image_embedding column via match_listings_by_image.
+    Returns None on failure.
+    """
+    if not text or not text.strip():
+        return None
+    try:
+        import torch
+        model, tokenizer = _load_clip_text_model()
+        inputs = tokenizer(
+            [text], return_tensors="pt", padding=True, truncation=True, max_length=77
+        )
+        with torch.no_grad():
+            outputs = model(**inputs)
+            return outputs.text_embeds[0].cpu().numpy().tolist()
+    except Exception:
+        return None
 
 
 @st.cache_resource(show_spinner=False)

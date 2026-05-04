@@ -11,7 +11,11 @@ _EMBEDDERS = os.path.join(_HERE, "..", "embedders")
 if _EMBEDDERS not in sys.path:
     sys.path.insert(0, _EMBEDDERS)
 
-from local_embedder import embed_listings, search_by_vibe
+from local_embedder import embed_query
+
+_PROJECT_ROOT = os.path.join(_HERE, "..", "..")
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 _DATA_DIR = os.path.join(_HERE, "..")   # Streamlit Interface/
 
@@ -47,8 +51,11 @@ def safe_str(val):
 def prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Strip unnamed columns and add numeric helper columns for price and rooms."""
     df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
-    price_col = "rent" if "rent" in df.columns else "price" if "price" in df.columns else None
-    df["_price_num"] = df[price_col].apply(parse_price) if price_col else None
+    if "price_numeric" in df.columns:
+        df["_price_num"] = pd.to_numeric(df["price_numeric"], errors="coerce")
+    else:
+        price_col = "rent" if "rent" in df.columns else "price" if "price" in df.columns else None
+        df["_price_num"] = df[price_col].apply(parse_price) if price_col else None
     rooms_col = "rooms" if "rooms" in df.columns else ("rooms_num" if "rooms_num" in df.columns else None)
     df["_rooms_num"] = df[rooms_col].apply(parse_rooms) if rooms_col else None
     return df
@@ -60,8 +67,15 @@ def load_csv(path: str) -> pd.DataFrame:
     df["platform"] = "Storia"
     return df
 
-def apply_filters(df: pd.DataFrame, max_price: int, sel_rooms: str) -> pd.DataFrame:
-    """Apply price and room count filters to the listings DataFrame."""
+def apply_filters(
+    df: pd.DataFrame,
+    max_price: int,
+    sel_rooms: str,
+    min_sqm: int = 0,
+    max_sqm: int = 0,
+    property_types: list[str] | None = None,
+) -> pd.DataFrame:
+    """Apply price, room count, area and property-type filters."""
     if df.empty:
         return df
 
@@ -71,10 +85,22 @@ def apply_filters(df: pd.DataFrame, max_price: int, sel_rooms: str) -> pd.DataFr
 
     if sel_rooms != "Any" and "_rooms_num" in df.columns:
         has_rooms = df["_rooms_num"].notna()
-        if sel_rooms == "4+":
-            df = df[~has_rooms | (df["_rooms_num"] >= 4)]
+        if sel_rooms == "5+":
+            df = df[~has_rooms | (df["_rooms_num"] >= 5)]
         else:
             df = df[~has_rooms | (df["_rooms_num"] == int(sel_rooms))]
+
+    if (min_sqm or max_sqm) and "area_sqm" in df.columns:
+        sqm = pd.to_numeric(df["area_sqm"], errors="coerce")
+        has_sqm = sqm.notna()
+        if min_sqm and min_sqm > 0:
+            df = df[~has_sqm | (sqm >= min_sqm)]
+        if max_sqm and max_sqm > 0:
+            df = df[~has_sqm | (sqm <= max_sqm)]
+
+    if property_types and "property_type" in df.columns:
+        known = df["property_type"].notna()
+        df = df[~known | df["property_type"].isin(property_types)]
 
     return df
 
@@ -94,45 +120,41 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
     if not has_vibe and not has_image:
         return df, False, None
 
-    # ── Text embeddings (only when vibe is present) ───────────────────────────
+    # ── Text search via pgvector (Supabase match_listings RPC) ───────────────
     text_scores: dict = {}
     if has_vibe:
-        rows_payload = [
-            {
-                "description":  str(row.get("description", "") or ""),
-                "url":          str(row.get(url_col, "") or ""),
-                "hard_filters": hard_filter_keys,
-                "soft_filters": [],
-            }
-            for _, row in df[[url_col, "description"]].fillna("").iterrows()
-            if str(row.get("description", "")).strip()
-        ]
-        if not skip_embed:
-            _, embed_error = embed_listings(rows_payload, server_url=server_url)
-        matches, search_error = search_by_vibe(
-            query=vibe,
-            limit=len(rows_payload) or 1,
-            url_filters=hard_filter_keys,
-            server_url=server_url,
-        )
-        if search_error and not embed_error:
-            embed_error = search_error
-        if matches:
-            distances = [m["distance"] for m in matches]
-            min_d, max_d = min(distances), max(distances)
-            d_range = (max_d - min_d) if max_d > min_d else 1.0
-            text_scores = {m["url"]: 1.0 - (m["distance"] - min_d) / d_range for m in matches}
+        try:
+            q_embedding = embed_query(vibe)
+            if q_embedding:
+                import db_utils
+                text_scores = db_utils.search_by_text_vibe(
+                    q_embedding,
+                    limit=min(max(len(df) * 3, 200), 1000),
+                )
+                if not text_scores:
+                    embed_error = "No pgvector matches — run scripts/backfill_embeddings.py to populate embeddings"
+            else:
+                embed_error = "Failed to embed query text"
+        except Exception as e:
+            embed_error = f"pgvector search error: {e}"
 
-    # ── Image scores ──────────────────────────────────────────────────────────
+    # ── Image scores via Supabase (image_embedding column) ───────────────────
+    # Cover photo CLIP embeddings are stored in listings.image_embedding (512-dim).
+    # For template photos: use the pre-computed embedding directly.
+    # For text vibe: encode with the local CLIP text tower first.
     image_scores: dict = {}
     img_error = None
     try:
-        from image_embedder import search_by_text_vibe, search_by_image_embedding
+        import db_utils as _db
         limit = min(3000, len(df) * 20)
+        clip_emb = None
         if has_image:
-            image_scores, img_error = search_by_image_embedding(image_embedding, limit=limit)
+            clip_emb = image_embedding
         elif has_vibe:
-            image_scores, img_error = search_by_text_vibe(vibe, limit=limit)
+            from image_embedder import clip_encode_text
+            clip_emb = clip_encode_text(vibe)
+        if clip_emb:
+            image_scores = _db.search_by_image_embedding(clip_emb, limit=limit)
     except Exception as e:
         img_error = str(e)
     if img_error and not embed_error:
@@ -166,6 +188,62 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
     df["_similarity_score"] = df[url_col].map(final_scores)
     df = df.sort_values("_similarity_score", ascending=False, na_position="last").reset_index(drop=True)
     return df, True, embed_error
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_price_stats() -> dict:
+    try:
+        import db_utils
+        return db_utils.get_price_stats()
+    except Exception:
+        return {}
+
+
+def apply_price_fairness(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a 'price_fairness' column: '+12% vs avg', '-8% vs avg', or None.
+
+    Labels are suppressed when:
+    - district or rooms is missing
+    - fewer than 5 comparables exist in that bucket
+    - price is within ±5% of the average (too close to call)
+    """
+    stats = _cached_price_stats()
+    df = df.copy()
+    if not stats or df.empty:
+        df["price_fairness"] = None
+        return df
+
+    THRESHOLD = 5.0
+    labels = []
+    for _, row in df.iterrows():
+        district = str(row.get("district") or "").strip()
+        rooms    = str(row.get("rooms") or "").strip()
+        price    = row.get("price_numeric")
+
+        if not district or not rooms or price is None or str(price) in ("", "nan"):
+            labels.append(None)
+            continue
+
+        bucket = stats.get((district, rooms))
+        if not bucket:
+            labels.append(None)
+            continue
+
+        try:
+            pct = (float(price) - bucket["avg"]) / bucket["avg"] * 100
+        except (TypeError, ZeroDivisionError):
+            labels.append(None)
+            continue
+
+        if abs(pct) < THRESHOLD:
+            labels.append(None)
+        elif pct > 0:
+            labels.append(f"+{pct:.0f}% vs avg")
+        else:
+            labels.append(f"{pct:.0f}% vs avg")
+
+    df["price_fairness"] = labels
+    return df
 
 
 def apply_vibe(df: pd.DataFrame, vibe: str) -> pd.DataFrame:

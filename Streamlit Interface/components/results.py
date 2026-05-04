@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import sys
 import importlib
-from utils import safe_str, apply_filters, prepare_dataframe, apply_ai_scores
-from local_embedder import embed_listings
+import json
+from utils import safe_str, apply_filters, prepare_dataframe, apply_ai_scores, apply_price_fairness
+from image_embedder import embed_all_photos
 from nlp_filters import apply_description_filters
 
 # Static mapping from spaCy filter key → (icon, Romanian label)
@@ -75,7 +76,14 @@ def _load_more(params: dict, is_initial: bool = False):
             df_running = pd.concat([df_running, prepare_dataframe(partial_df)], ignore_index=True)
             status_box.info(f"🕷️ {len(df_running)} listings found so far…")
             with cards_box.container():
-                render_property_cards(apply_filters(df_running, params.get("max_price", 0), params.get("rooms", "Any")))
+                render_property_cards(apply_filters(
+                    df_running,
+                    params.get("max_price", 0),
+                    params.get("rooms", "Any"),
+                    params.get("min_sqm", 0),
+                    params.get("max_sqm", 0),
+                    params.get("property_types"),
+                ))
         elif status == "done":
             df_final = partial_df
 
@@ -106,21 +114,13 @@ def _load_more(params: dict, is_initial: bool = False):
     else:
         df_new_only = df_final
 
-    # ── Embed newly scraped listings into ChromaDB ───────────────────────────
-    if url_col_new and not df_new_only.empty and "description" in df_new_only.columns:
-        embed_payload = [
-            {
-                "description": str(row.get("description", "") or ""),
-                "url":         str(row.get(url_col_new, "") or ""),
-                "hard_filters": [],
-                "soft_filters": [],
-            }
-            for _, row in df_new_only[[url_col_new, "description"]].fillna("").iterrows()
-            if str(row.get("description", "")).strip() and str(row.get(url_col_new, "")).strip()
-        ]
-        if embed_payload:
-            with st.spinner(f"Embedding {len(embed_payload)} new listings into ChromaDB…"):
-                embed_listings(embed_payload)
+    # ── Embed all photos into image ChromaDB collection ──────────────────────
+    image_server_url = params.get("image_server_url", "")
+    if not df_new_only.empty and "image_urls" in df_new_only.columns and image_server_url:
+        with st.spinner(f"Embedding photos for {len(df_new_only)} new listings…"):
+            n_embedded, img_err = embed_all_photos(df_new_only, image_server_url)
+        if img_err:
+            st.warning(f"Image embedding: {img_err}")
 
     spacy_filters = params.get("spacy_filters", {})
     if spacy_filters:
@@ -175,7 +175,7 @@ def render_results():
     _render_filter_pills(params.get("spacy_filters", {}))
 
     embed_error = params.get("embed_error")
-    if embed_error:
+    if embed_error and not params.get("embedding_sorted", False):
         st.warning(f"AI ranking unavailable: {embed_error}", icon="⚠️")
 
     if df.empty and not pending_scrape:
@@ -188,7 +188,15 @@ def render_results():
         return
 
     # ── Apply filters ──
-    df_f = apply_filters(df, params.get("max_price", 0), params.get("rooms", "Any"))
+    df_f = apply_filters(
+        df,
+        params.get("max_price", 0),
+        params.get("rooms", "Any"),
+        params.get("min_sqm", 0),
+        params.get("max_sqm", 0),
+        params.get("property_types"),
+    )
+    df_f = apply_price_fairness(df_f)
 
     # ── Count ──
     total, shown = len(df), len(df_f)
@@ -230,6 +238,7 @@ def render_results():
                     df, vibe, server_url, url_col,
                     skip_embed=True,
                     spacy_filters=params.get("spacy_filters"),
+                    image_embedding=params.get("image_embedding"),
                 )
             params["embedding_sorted"] = embedding_sorted
             params["embed_error"] = embed_error
@@ -253,6 +262,57 @@ def render_results():
             if st.button(f"🔄 Search pages {pages_scraped + 1}–{pages_scraped + 2}", use_container_width=True):
                 _load_more(params)
 
+def _parse_image_urls(raw) -> list:
+    """Return a list of image dicts from a column value (JSON string or list)."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    if isinstance(raw, list):
+        return raw
+    return []
+
+
+def _build_image_html(images: list) -> str:
+    """Cover photo + scrollable thumbnail strip."""
+    if not images:
+        return ""
+
+    first = images[0]
+    cover_url = (first.get("medium") or first.get("small")
+                 or first.get("large") or first.get("thumbnail") or "")
+    if not cover_url:
+        return ""
+
+    cover_html = (
+        f'<img src="{cover_url}" '
+        f'style="width:100%;height:200px;object-fit:cover;border-radius:10px 10px 0 0;display:block;" '
+        f'loading="lazy"/>'
+    )
+
+    if len(images) <= 1:
+        return cover_html
+
+    thumbs = ""
+    for img in images[1:6]:   # show up to 5 thumbnails
+        t = img.get("thumbnail") or img.get("small") or img.get("medium") or ""
+        if t:
+            thumbs += (
+                f'<img src="{t}" '
+                f'style="height:54px;width:80px;object-fit:cover;border-radius:4px;flex-shrink:0;" '
+                f'loading="lazy"/>'
+            )
+
+    strip_html = (
+        f'<div style="display:flex;gap:4px;padding:4px 6px;'
+        f'overflow-x:auto;background:#0e0e1a;">{thumbs}</div>'
+    )
+    return cover_html + strip_html
+
+
 def render_property_cards(df_f):
     if df_f.empty:
         st.markdown("""
@@ -268,15 +328,43 @@ def render_property_cards(df_f):
         for i, (_, row) in enumerate(df_f.iterrows()):
             col = left if i % 2 == 0 else right
             with col:
-                title      = safe_str(row.get("title", "")) or "Untitled listing"
-                price_disp = safe_str(row.get("rent", row.get("price", ""))) or "—"
-                district   = safe_str(row.get("district", ""))
-                location   = safe_str(row.get("location_full_name", ""))
-                rooms_val  = safe_str(row.get("rooms", ""))
-                sqm        = safe_str(row.get("m", ""))
+                def _esc(s: str) -> str:
+                    return (s.replace("&", "&amp;").replace("<", "&lt;")
+                             .replace(">", "&gt;").replace('"', "&quot;")
+                             .replace("'", "&#39;"))
+
+                title      = _esc(safe_str(row.get("title", "")) or "Untitled listing")
+
+                # Price: prefer numeric + currency (clean, no encoding corruption)
+                price_num  = row.get("price_numeric")
+                price_cur  = safe_str(row.get("price_currency", "EUR"))
+                if price_num is not None and str(price_num) not in ("", "nan"):
+                    symbol     = "€" if price_cur == "EUR" else "RON"
+                    price_disp = f"{int(float(price_num)):,} {symbol}/lună".replace(",", " ")
+                else:
+                    price_disp = _esc(safe_str(
+                        row.get("price_eur", row.get("rent", row.get("price", "")))
+                    ) or "—")
+
+                district   = _esc(safe_str(row.get("district", "")))
+                location   = _esc(safe_str(row.get("location_full", row.get("location_full_name", ""))))
+
+                # Rooms: canonical value is already normalised ('1'–'5+')
+                rooms_raw  = safe_str(row.get("rooms", "") or row.get("rooms_num", ""))
+                rooms_val  = _esc(f"{rooms_raw} cam." if rooms_raw else "")
+
+                # Area: canonical column is a float; format it
+                area_raw   = row.get("area_sqm", row.get("m", ""))
+                if area_raw is not None and str(area_raw) not in ("", "nan"):
+                    try:
+                        sqm = _esc(f"{float(area_raw):.0f} m²")
+                    except (ValueError, TypeError):
+                        sqm = _esc(safe_str(area_raw))
+                else:
+                    sqm = ""
                 desc       = safe_str(row.get("description", ""))
                 url        = safe_str(row.get("url", ""))
-                platform   = safe_str(row.get("platform", "Storia"))
+                platform   = _esc(safe_str(row.get("platform", "Storia")))
 
                 chips = ""
                 if rooms_val: chips += f'<span class="meta-chip">🛏 {rooms_val}</span>'
@@ -284,20 +372,30 @@ def render_property_cards(df_f):
                 loc_label = district or location[:30]
                 if loc_label: chips += f'<span class="meta-chip">📍 {loc_label}</span>'
 
+                # ── Price fairness badge ─────────────────────────────────
+                fairness = safe_str(row.get("price_fairness", ""))
+                if fairness:
+                    clr  = "#4ade80" if fairness.startswith("-") else "#f87171"
+                    icon = "📉" if fairness.startswith("-") else "📈"
+                    chips += (
+                        f'<span style="display:inline-block;background:{clr}22;color:{clr};'
+                        f'border:1px solid {clr}55;border-radius:6px;'
+                        f'padding:2px 8px;font-size:0.72rem;font-weight:600;margin-left:2px;">'
+                        f'{icon} {_esc(fairness)}</span>'
+                    )
+
                 # ── Similarity score badge ───────────────────────────────
                 score_badge = ""
                 if has_scores:
                     raw_dist = row.get("_similarity_score")
                     if raw_dist is not None and str(raw_dist) != "nan":
-                        # _similarity_score is 0–1 (1 = best match)
                         match_pct = round(float(raw_dist) * 100)
-                        # Colour: green ≥ 70%, yellow ≥ 40%, muted otherwise
                         if match_pct >= 70:
-                            colour = "#4ade80"   # green
+                            colour = "#4ade80"
                         elif match_pct >= 40:
-                            colour = "#facc15"   # yellow
+                            colour = "#facc15"
                         else:
-                            colour = "#94a3b8"   # slate
+                            colour = "#94a3b8"
                         score_badge = (
                             f'<span style="display:inline-block;vertical-align:middle;'
                             f'background:{colour}22;color:{colour};'
@@ -306,17 +404,33 @@ def render_property_cards(df_f):
                             f'🎯 {match_pct}% match</span>'
                         )
 
+                images     = _parse_image_urls(row.get("image_urls"))
+                image_html = _build_image_html(images)
+                img_count  = f'<span class="meta-chip">📷 {len(images)}</span>' if images else ""
+
                 plat_class = "olx" if "olx" in platform.lower() else ""
                 link_html  = f'<a class="card-link" href="{url}" target="_blank">View listing →</a>' if url else ""
-                desc_html  = desc[:400].replace("<", "&lt;").replace(">", "&gt;")
+                desc_html  = (
+                    desc[:400]
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace('"', "&quot;")
+                    .replace("'", "&#39;")
+                    .replace("\n", " ")
+                )
 
-                st.markdown(f"""
-                <div class="prop-card">
-                    <div class="card-platform {plat_class}">{platform}</div>
-                    <div class="card-title">{title}</div>
-                    <div class="card-price">{price_disp}&nbsp;&nbsp;{score_badge}</div>
-                    <div class="card-meta">{chips}</div>
-                    <div class="card-desc">{desc_html}</div>
-                    {link_html}
-                </div>
-                """, unsafe_allow_html=True)
+                card_html = (
+                    f'<div class="prop-card" style="padding:0;overflow:hidden;">'
+                    f'{image_html}'
+                    f'<div style="padding:16px;">'
+                    f'<div class="card-platform {plat_class}">{platform}</div>'
+                    f'<div class="card-title">{title}</div>'
+                    f'<div class="card-price">{price_disp}&nbsp;&nbsp;{score_badge}</div>'
+                    f'<div class="card-meta">{chips}{img_count}</div>'
+                    f'<div class="card-desc">{desc_html}</div>'
+                    f'{link_html}'
+                    f'</div>'
+                    f'</div>'
+                )
+                st.markdown(card_html, unsafe_allow_html=True)

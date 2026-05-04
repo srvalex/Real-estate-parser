@@ -3,6 +3,7 @@ import json
 import asyncio
 import sys
 import io
+import os
 from playwright.async_api import async_playwright
 
 async def get_storia_manual(url):
@@ -88,15 +89,33 @@ async def fetch_url(context, url):
     finally:
         await page.close()
 
+def _playwright_proxy() -> dict | None:
+    """Parse PROXY_URL env var into the dict Playwright's new_context() expects."""
+    from urllib.parse import urlparse
+    raw = os.environ.get("PROXY_URL", "").strip()
+    if not raw:
+        return None
+    p = urlparse(raw)
+    proxy = {"server": f"{p.scheme}://{p.hostname}:{p.port}"}
+    if p.username:
+        proxy["username"] = p.username
+    if p.password:
+        proxy["password"] = p.password
+    return proxy
+
+
 async def scrape_batch(urls):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent="Mozilla/5.0... Chrome/122.0.0.0")
-        
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            proxy=_playwright_proxy(),
+        )
+
         # Run all URLs in this batch simultaneously
         tasks = [fetch_url(context, url) for url in urls]
         results = await asyncio.gather(*tasks)
-        
+
         await browser.close()
         return results
 

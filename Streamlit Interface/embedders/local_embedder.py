@@ -12,10 +12,14 @@ import os
 from typing import Optional, List, Dict
 import streamlit as st
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env"))
+except ImportError:
+    pass
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
-CHROMA_DB_PATH = os.path.join(_HERE, "..", "..", "ChromaDB")
-COLLECTION_NAME = "web_archive"
 MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 
 # Kept for compatibility with app.py / home.py imports
@@ -23,28 +27,118 @@ DEFAULT_SERVER_URL = None
 
 
 @st.cache_resource(show_spinner="Loading AI model…")
-def _load_resources():
-    """Load model and ChromaDB collection once per Streamlit server process."""
+def _get_model():
+    """Load SentenceTransformer once per Streamlit server process."""
     from sentence_transformers import SentenceTransformer
-    import chromadb
-    model = SentenceTransformer(MODEL_NAME)
-    client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-    collection = client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine"},
-    )
-    return model, collection
+    return SentenceTransformer(MODEL_NAME)
+
+
+def _get_id_token(service_url: str) -> str | None:
+    """Return a Google ID token for the given Cloud Run service URL.
+
+    Resolves GOOGLE_APPLICATION_CREDENTIALS relative to the project root
+    (two levels above this file) so the path works regardless of where
+    Streamlit is launched from.
+    """
+    key_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if not key_path:
+        print("  [embed-service] GOOGLE_APPLICATION_CREDENTIALS not set", flush=True)
+        return None
+    if not os.path.isabs(key_path):
+        _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        key_path = os.path.join(_root, key_path)
+    if not os.path.exists(key_path):
+        print(f"  [embed-service] key file not found: {key_path}", flush=True)
+        return None
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport import requests as ga_requests
+        creds = service_account.IDTokenCredentials.from_service_account_file(
+            key_path, target_audience=service_url
+        )
+        creds.refresh(ga_requests.Request())
+        return creds.token
+    except Exception as e:
+        print(f"  [embed-service] ID token error: {e}", flush=True)
+        return None
+
+
+def warmup_service(service_url: str) -> None:
+    """Fire a /health request so the container wakes up while the user fills the form."""
+    import threading
+    import requests
+
+    def _ping():
+        try:
+            headers = {}
+            token = _get_id_token(service_url)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            requests.get(f"{service_url.rstrip('/')}/health", headers=headers, timeout=10)
+            print("  [embed-service] warmup ping sent", flush=True)
+        except Exception:
+            pass
+
+    threading.Thread(target=_ping, daemon=True).start()
+
+
+def _embed_via_service(text: str, service_url: str) -> list | None:
+    """Call the Cloud Run embedding service POST /embed/text.
+    Retries on 503 (models still loading after cold start) for up to 90 seconds.
+    """
+    import time
+    import requests
+
+    headers: dict = {}
+    token = _get_id_token(service_url)
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    url      = f"{service_url.rstrip('/')}/embed/text"
+    deadline = time.time() + 90
+
+    while time.time() < deadline:
+        try:
+            resp = requests.post(url, json={"text": text}, headers=headers, timeout=20)
+            if resp.status_code == 503:
+                print("  [embed-service] warming up, retrying in 5s…", flush=True)
+                time.sleep(5)
+                continue
+            resp.raise_for_status()
+            return resp.json()["embedding"]
+        except requests.exceptions.RequestException as e:
+            print(f"  [embed-service] request error: {e}", flush=True)
+            return None
+
+    print("  [embed-service] timed out waiting for service to warm up", flush=True)
+    return None
+
+
+def embed_query(text: str) -> list | None:
+    """Embed a single query string.
+
+    Calls the Cloud Run embedding service if EMBED_SERVICE_URL is set,
+    falls back to the local SentenceTransformer model otherwise.
+    """
+    if not text or not text.strip():
+        return None
+    service_url = os.environ.get("EMBED_SERVICE_URL", "").strip()
+    if service_url:
+        result = _embed_via_service(text, service_url)
+        if result is not None:
+            return result
+    try:
+        return _get_model().encode(text, normalize_embeddings=True).tolist()
+    except Exception as e:
+        print(f"  [embed] local ST fallback failed: {e}", flush=True)
+        return None
 
 
 # ── Public API (same signatures as ollama_parser.py) ─────────────────────────
 
 def check_server(server_url: str = None, timeout: int = 5) -> bool:
-    """Always returns True — the model runs locally, no server needed."""
-    try:
-        _load_resources()
-        return True
-    except Exception:
-        return False
+    """Local resources disabled — always returns False."""
+    return False
 
 
 def embed_listings(
@@ -52,59 +146,8 @@ def embed_listings(
     server_url: str = None,
     timeout: int = 120,
 ):
-    """
-    Embed listings into the local ChromaDB collection.
-
-    Args:
-        listings:   List of dicts with keys: description, url, hard_filters, soft_filters.
-        server_url: Ignored (kept for API compatibility).
-
-    Returns:
-        (success_message, error_string) — error_string is None on success.
-    """
-    if not listings:
-        return "Nothing to embed.", None
-
-    try:
-        model, collection = _load_resources()
-
-        # Filter out entries without a URL or description, then deduplicate by URL.
-        # ChromaDB raises if the same ID appears twice in one upsert call.
-        seen_urls = set()
-        valid = []
-        for l in listings:
-            url = (l.get("url") or l.get("link") or "").strip()
-            desc = (l.get("description") or "").strip()
-            if url and desc and url not in seen_urls:
-                seen_urls.add(url)
-                valid.append(l)
-
-        if not valid:
-            return "No valid listings to embed.", None
-
-        descriptions = [l.get("description", "") for l in valid]
-        urls = [l.get("url", "") or l.get("link", "") for l in valid]
-
-        embeddings = model.encode(descriptions, show_progress_bar=False).tolist()
-
-        metadatas = []
-        for l in valid:
-            meta = {"url": l.get("url", "") or l.get("link", "")}
-            for hf in l.get("hard_filters", []):
-                meta[f"filter_{hf.lower()}"] = True
-            metadatas.append(meta)
-
-        collection.upsert(
-            documents=descriptions,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            ids=urls,
-        )
-
-        return f"Stored {len(urls)} listings successfully.", None
-
-    except Exception as e:
-        return None, f"Local embed error: {e}"
+    """Local ChromaDB embedding disabled — no-op stub."""
+    return None, "Local embedding disabled — use cloud service"
 
 
 def search_by_vibe(
@@ -114,48 +157,5 @@ def search_by_vibe(
     server_url: str = None,
     timeout: int = 30,
 ) -> tuple[List[Dict], Optional[str]]:
-    """
-    Query the local ChromaDB for listings ranked by cosine similarity.
-
-    Args:
-        query:       Raw user prompt string.
-        limit:       Max number of results to return.
-        url_filters: Hard feature-flag keys (e.g. ['HAS_METRO']).
-        server_url:  Ignored (kept for API compatibility).
-
-    Returns:
-        (matches_list, error_string) — error_string is None on success.
-    """
-    if not query or not query.strip():
-        return [], None
-
-    try:
-        model, collection = _load_resources()
-
-        total = collection.count()
-        if total == 0:
-            return [], "ChromaDB collection is empty."
-
-        # Safe limit — ChromaDB raises if n_results > collection.count()
-        safe_limit = min(limit, total)
-
-        query_embedding = model.encode([query], show_progress_bar=False).tolist()[0]
-
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=safe_limit,
-        )
-
-        matches = []
-        for i in range(len(results["ids"][0])):
-            matches.append({
-                "url":         results["ids"][0][i],
-                "description": results["documents"][0][i],
-                "distance":    results["distances"][0][i],
-                "metadata":    results["metadatas"][0][i],
-            })
-
-        return matches, None
-
-    except Exception as e:
-        return [], f"Local search error: {e}"
+    """Local ChromaDB search disabled — no-op stub."""
+    return [], "Local search disabled — use cloud service"

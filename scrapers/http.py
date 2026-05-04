@@ -2,6 +2,13 @@
 scrapers/http.py
 ────────────────
 Shared HTTP client used by all platform scrapers.
+
+Proxy support
+─────────────
+Call set_proxy("http://user:pass@host:port") before a crawl session to route
+all curl_cffi requests through that proxy.  set_proxy(None) disables it.
+Playwright subprocesses read the PROXY_URL environment variable — the crawler
+sets it in sync with set_proxy() so both layers stay consistent.
 """
 
 from curl_cffi import requests
@@ -19,10 +26,26 @@ HEADERS = {
     "Sec-Fetch-User": "?1",
 }
 
+_current_proxy: str | None = None
+
+
+def set_proxy(proxy_url: str | None) -> None:
+    global _current_proxy
+    _current_proxy = proxy_url
+
+
+def get_proxy() -> str | None:
+    return _current_proxy
+
 
 def get_content(url: str) -> str | None:
+    proxies = (
+        {"https": _current_proxy, "http": _current_proxy} if _current_proxy else None
+    )
     try:
-        response = requests.get(url, headers=HEADERS, impersonate="chrome120")
+        response = requests.get(
+            url, headers=HEADERS, impersonate="chrome120", proxies=proxies
+        )
         response.raise_for_status()
         return response.text
     except Exception as e:

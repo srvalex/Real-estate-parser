@@ -1,0 +1,15 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - -f
+      - embedding-service/Dockerfile
+      - -t
+      - europe-west1-docker.pkg.dev/your-gcp-project-id/repo-crawler/embedder:latest
+      - .
+images:
+  - europe-west1-docker.pkg.dev/your-gcp-project-id/repo-crawler/embedder:latest
+options:
+  machineType: E2_HIGHCPU_8
+  diskSizeGb: 50
+timeout: 1800s

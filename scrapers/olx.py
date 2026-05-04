@@ -4,9 +4,57 @@ scrapers/olx.py
 OLX Romania scraper implementing PlatformScraper.
 """
 
+import json
+import os
+import re
+
 from bs4 import BeautifulSoup
 from .base import PlatformScraper
 from .http import get_content
+
+_DISTRICTS_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "Streamlit Interface", "districts.json"
+)
+_NEIGHBOURHOOD_MAP: dict | None = None  # {normalized_name: original_name}, longest-first
+
+
+def _get_neighbourhood_map() -> dict:
+    """Lazily load and return {normalised_name: original_name} sorted longest-first."""
+    global _NEIGHBOURHOOD_MAP
+    if _NEIGHBOURHOOD_MAP is None:
+        try:
+            with open(_DISTRICTS_FILE, encoding="utf-8") as f:
+                districts = json.load(f)
+        except Exception:
+            _NEIGHBOURHOOD_MAP = {}
+            return _NEIGHBOURHOOD_MAP
+        raw: dict[str, str] = {}
+        for neighbourhoods in districts.values():
+            for name in neighbourhoods:
+                norm = (name.lower()
+                        .replace("ă", "a").replace("î", "i").replace("â", "a")
+                        .replace("ș", "s").replace("ț", "t"))
+                raw[norm] = name
+        # Sort longest first so "Drumul Taberei" matches before "Taberei"
+        _NEIGHBOURHOOD_MAP = dict(sorted(raw.items(), key=lambda kv: -len(kv[0])))
+    return _NEIGHBOURHOOD_MAP
+
+
+def _extract_district_from_title(title: str) -> str | None:
+    """Return the first neighbourhood name found in *title*, or None."""
+    if not title:
+        return None
+    neigh_map = _get_neighbourhood_map()
+    if not neigh_map:
+        return None
+    title_norm = (title.lower()
+                  .replace("ă", "a").replace("î", "i").replace("â", "a")
+                  .replace("ș", "s").replace("ț", "t"))
+    for norm_name, original_name in neigh_map.items():
+        pattern = r"(?<![a-z0-9])" + re.escape(norm_name) + r"(?![a-z0-9])"
+        if re.search(pattern, title_norm):
+            return original_name
+    return None
 
 
 class OLXScraper(PlatformScraper):
@@ -126,9 +174,13 @@ class OLXScraper(PlatformScraper):
              a soft-deleted page with a 200 instead of 410.
         """
         from curl_cffi import requests as cffi_requests
-        from scrapers.http import HEADERS
+        from scrapers.http import HEADERS, get_proxy
+        proxy_url = get_proxy()
+        proxies = {"https": proxy_url, "http": proxy_url} if proxy_url else None
         try:
-            response = cffi_requests.get(url, headers=HEADERS, impersonate="chrome120")
+            response = cffi_requests.get(
+                url, headers=HEADERS, impersonate="chrome120", proxies=proxies
+            )
             if response.status_code == 410:
                 return {"url": url, "status": self.STATUS_EXPIRED}
             if response.status_code != 200:
@@ -172,6 +224,7 @@ class OLXScraper(PlatformScraper):
                     "rent":        price,
                     "price":       price,
                     "description": description,
+                    "district":    _extract_district_from_title(title),
                     "image_urls":  image_urls,
                 },
             }

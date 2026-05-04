@@ -17,10 +17,26 @@ We compare the final page URL against the requested URL — mismatch = expired.
 
 import asyncio
 import json
+import os
 import sys
 import io
+from urllib.parse import urlparse
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
+
+def _playwright_proxy() -> dict | None:
+    """Parse PROXY_URL env var into the dict Playwright's new_context() expects."""
+    raw = os.environ.get("PROXY_URL", "").strip()
+    if not raw:
+        return None
+    p = urlparse(raw)
+    proxy = {"server": f"{p.scheme}://{p.hostname}:{p.port}"}
+    if p.username:
+        proxy["username"] = p.username
+    if p.password:
+        proxy["password"] = p.password
+    return proxy
 
 
 async def fetch_url(context, url: str) -> dict:
@@ -35,6 +51,12 @@ async def fetch_url(context, url: str) -> dict:
 
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+        # ── Expired detection: listing redirects to homepage/search ──────────
+        final_url = page.url.rstrip("/")
+        requested  = url.rstrip("/")
+        if final_url != requested and "/oferta/" not in final_url:
+            return {"url": url, "status": "expired"}
 
         # ── Extract JSON-LD ───────────────────────────────────────────────────
         ld_blocks = await page.evaluate(
@@ -93,7 +115,8 @@ async def scrape_batch(urls: list[str]) -> list[dict]:
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/122.0.0.0 Safari/537.36"
-            )
+            ),
+            proxy=_playwright_proxy(),
         )
         tasks = [fetch_url(context, url) for url in urls]
         results = await asyncio.gather(*tasks)

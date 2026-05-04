@@ -272,27 +272,27 @@ class ImobiliareRoScraper(PlatformScraper):
                 rooms = m.group(1) if m else bedroom_raw
 
             # ── Area (sqm) ────────────────────────────────────────────────────
-            # Not a structured field — best-effort regex on the short summary
-            # RealEstateListing.description e.g. "apartament cu 2 camere, ..., 53 mp, ..."
+            # Primary: RealEstateListing.floorSize.value (structured)
+            # Fallback: regex on the short summary description
             area_sqm = None
-            summary = listing.get("description", "")
-            if summary:
-                m = re.search(r"(\d+)\s*mp", summary)
-                if m:
-                    area_sqm = m.group(1)
+            floor_size = listing.get("floorSize", {})
+            if isinstance(floor_size, dict) and floor_size.get("value") not in (None, ""):
+                try:
+                    area_sqm = str(floor_size["value"])
+                except Exception:
+                    pass
+            if area_sqm is None:
+                summary = listing.get("description", "")
+                if summary:
+                    m = re.search(r"(\d+)\s*mp", summary)
+                    if m:
+                        area_sqm = m.group(1)
 
-            # ── Source ID ─────────────────────────────────────────────────────
-            # Prefer dataLayer listing_id; fall back to numeric suffix in URL
             source_id = str(dl.get("listing_id", ""))
             if not source_id:
                 m = re.search(r"-(\d+)$", url.rstrip("/"))
                 source_id = m.group(1) if m else ""
 
-            # ── Images ────────────────────────────────────────────────────────
-            # Product.image[].@id = CDN URL with OG transform:
-            #   https://i.roamcdn.net/prop/imo/og-image-full-1200w-630h/<hash>/-/<path>.jpg
-            # We use the OG URL directly as medium + large (1200×630, always valid).
-            # thumbnail and small are left empty — card renderer falls back to medium.
             raw_images = product.get("image", [])
             image_urls = []
             for img in raw_images:
@@ -305,6 +305,37 @@ class ImobiliareRoScraper(PlatformScraper):
                     "medium":    og_url,
                     "large":     og_url,
                 })
+
+            # dl keys already consumed at top level — skip them in extras
+            _USED_DL = {
+                "listing_id", "listing_location_title",
+                "listing_location_slug", "onesignal_listing_bedroom",
+            }
+            extras: dict = {}
+
+            # RealEstateListing structured fields
+            for ld_key in ("floorLevel", "numberOfRooms", "numberOfBathroomsTotal", "yearBuilt"):
+                val = listing.get(ld_key)
+                if val not in (None, ""):
+                    extras[ld_key] = val
+            if isinstance(floor_size, dict) and floor_size.get("value") not in (None, ""):
+                extras["floorSizeValue"] = floor_size["value"]
+                extras["floorSizeUnit"]  = floor_size.get("unitCode", "")
+
+            # additionalProperty arrays on Product and RealEstateListing nodes
+            for prop in (
+                listing.get("additionalProperty", [])
+                + product.get("additionalProperty", [])
+            ):
+                name = prop.get("name") or prop.get("propertyID", "")
+                val  = prop.get("value")
+                if name and val not in (None, ""):
+                    extras[name] = val
+
+            # Remaining dataLayer fields (all are listing-specific attributes)
+            for k, v in dl.items():
+                if k not in _USED_DL and v not in (None, "", [], {}):
+                    extras[k] = v
 
             return {
                 "platform_id":        self.platform_id,
@@ -321,6 +352,7 @@ class ImobiliareRoScraper(PlatformScraper):
                 "rooms":              rooms,
                 "area_sqm":           area_sqm,
                 "image_urls":         image_urls,
+                "extras":             extras if extras else None,
             }
 
         except Exception as e:

@@ -145,10 +145,13 @@ def extract_filters(text: str) -> dict:
     Run spaCy NLP on the user prompt and return a dict of detected filters.
 
     Returns:
-        e.g. {"ROOM_COUNT": "2", "LOCATION_SECTOR": "4", "HAS_METRO": True}
+        e.g. {"ROOM_COUNT": "2", "LOCATION_SECTOR": "4", "HAS_METRO": True,
+              "PROPERTY_TYPE": "Garsonieră", "AREA_MIN": 50}
     """
+    import re as _re
     doc = nlp(text.lower())
     found = {}
+    lowered = text.lower()
 
     # 1. Room count — numeric token whose syntactic head lemma is "cameră"
     for token in doc:
@@ -169,11 +172,10 @@ def extract_filters(text: str) -> dict:
         lemma = token.lemma_
         if lemma in REAL_ESTATE_TAXONOMY:
             key = REAL_ESTATE_TAXONOMY[lemma]
-            if key not in found:          # don't overwrite specific values
+            if key not in found:
                 found[key] = True
 
-    # 4. Exact substring check for multi-word phrases (e.g. "pet-friendly")
-    lowered = text.lower()
+    # 4. Exact substring check for multi-word phrases
     multi_word = {
         "pet-friendly":        "PET_FRIENDLY",
         "animal de companie":  "PET_FRIENDLY",
@@ -184,6 +186,53 @@ def extract_filters(text: str) -> dict:
     for phrase, key in multi_word.items():
         if phrase in lowered and key not in found:
             found[key] = True
+
+    # 5. Property type — keyword matching
+    if "PROPERTY_TYPE" not in found:
+        if any(w in lowered for w in ("garsonier", "studio", "garconiera", "garçonieră")):
+            found["PROPERTY_TYPE"] = "Garsonieră"
+        elif any(w in lowered for w in ("casă", "casa", "vilă", "vila", "duplex")):
+            found["PROPERTY_TYPE"] = "Casă / Vilă"
+        elif "apartament" in lowered:
+            found["PROPERTY_TYPE"] = "Apartament"
+
+    # 6. Area range — "X mp", "minim X mp", "pana la X mp", etc.
+    # Minimum area: "minim/cel putin/minimum X mp"
+    m = _re.search(
+        r"(?:minim|cel\s+pu[tț]in|minimum|peste|mai\s+mare\s+de)\s+(\d+)\s*mp",
+        lowered,
+    )
+    if m:
+        found["AREA_MIN"] = int(m.group(1))
+
+    # Maximum area: "maxim/pana la/cel mult X mp"
+    m = _re.search(
+        r"(?:maxim|p[aâ]n[aă]\s+la|cel\s+mult|sub)\s+(\d+)\s*mp",
+        lowered,
+    )
+    if m:
+        found["AREA_MAX"] = int(m.group(1))
+
+    # Bare "X mp" with no qualifier → treat as minimum hint
+    if "AREA_MIN" not in found and "AREA_MAX" not in found:
+        m = _re.search(r"(\d{2,3})\s*mp", lowered)
+        if m:
+            found["AREA_MIN"] = int(m.group(1))
+
+    # 7. Price — "maxim 1500 euro", "sub 2000 eur", "pana la 1800 €", "buget 1200", bare "1500 euro"
+    _currency = r"(?:euro|eur|€|ron|lei)"
+    # Explicit upper-bound phrases
+    m = _re.search(
+        r"(?:maxim|p[aâ]n[aă]\s+la|cel\s+mult|sub|mai\s+pu[tț]in\s+de|buget(?:\s+de)?|pret\s+maxim)\s*(\d{3,5})\s*" + _currency,
+        lowered,
+    )
+    if m:
+        found["PRICE_MAX"] = int(m.group(1))
+    else:
+        # Bare "1500 euro" / "1500 €" with no qualifier
+        m = _re.search(r"(\d{3,5})\s*" + _currency, lowered)
+        if m:
+            found["PRICE_MAX"] = int(m.group(1))
 
     return found
 

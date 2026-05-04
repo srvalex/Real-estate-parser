@@ -20,7 +20,7 @@ import sqlite3
 from tqdm import tqdm
 from datetime import datetime
 import os
-from firebase_utils import save_to_firestore
+from db_utils import save_to_firestore
 from scrapers import SCRAPERS
 from scrapers.storia import StoriaScraper
 from scrapers.imobiliare import ImobiliareRoScraper
@@ -30,6 +30,21 @@ from scrapers.imobiliare import ImobiliareRoScraper
 # ─────────────────────────────────────────────
 
 DB_NAME = os.path.join(os.path.dirname(__file__), "Streamlit Interface", "real_estate.db")
+
+_embed_model = None
+
+
+def _get_embed_model():
+    global _embed_model
+    if _embed_model is None:
+        try:
+            from sentence_transformers import SentenceTransformer
+            print("  [embed] Loading SentenceTransformer…")
+            _embed_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        except Exception as e:
+            print(f"  [embed] Model unavailable, skipping embeddings: {e}")
+    return _embed_model
+
 
 DB_COLS = (
     "url TEXT PRIMARY KEY, platform_id TEXT, platform TEXT, source_id TEXT, "
@@ -69,18 +84,32 @@ def _save_new_listings(new_results: list, conn: sqlite3.Connection) -> pd.DataFr
             original_images[item.get("url", "")] = item["image_urls"]
             item["image_urls"] = json.dumps(item["image_urls"], ensure_ascii=False)
 
+    # Generate text embeddings for live listings before saving to Supabase.
+    model = _get_embed_model()
+    if model:
+        for item in new_results:
+            if item.get("is_available", 1) == 1 and "embedding" not in item:
+                text = (item.get("description") or item.get("title") or "").strip()
+                if text:
+                    try:
+                        item["embedding"] = model.encode(text, normalize_embeddings=True).tolist()
+                    except Exception:
+                        pass
+
     df_new = pd.DataFrame(new_results)
     df_new["scraped_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    _evolve_schema(conn, df_new)
+    # SQLite cannot store vector lists — drop the embedding column for local insert.
+    df_sqlite = df_new.drop(columns=["embedding"], errors="ignore")
+    _evolve_schema(conn, df_sqlite)
 
     try:
-        df_new.to_sql("listings", conn, if_exists="append", index=False)
+        df_sqlite.to_sql("listings", conn, if_exists="append", index=False)
         print(f"💾 Saved {len(df_new)} new records to SQLite.")
     except Exception as e:
         print(f"⚠️ Batch insert failed ({e}), retrying row by row…")
         saved, failed = 0, 0
-        for _, row in df_new.iterrows():
+        for _, row in df_sqlite.iterrows():
             try:
                 row.to_frame().T.to_sql("listings", conn, if_exists="append", index=False)
                 saved += 1
