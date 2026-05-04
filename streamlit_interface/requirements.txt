@@ -3,6 +3,8 @@ streamlit
 pandas
 requests
 python-dotenv
+beautifulsoup4
+curl_cffi
 
 # ── Database ──────────────────────────────────────────────────────────────────
 supabase
