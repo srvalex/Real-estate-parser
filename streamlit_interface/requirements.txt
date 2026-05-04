@@ -1,3 +1,29 @@
+# ── Core ──────────────────────────────────────────────────────────────────────
 streamlit
 pandas
 requests
+python-dotenv
+
+# ── Database ──────────────────────────────────────────────────────────────────
+supabase
+
+# ── Visualisation ─────────────────────────────────────────────────────────────
+plotly
+
+# ── Auth (Cloud Run job trigger from Streamlit) ───────────────────────────────
+google-auth
+
+# ── NLP ───────────────────────────────────────────────────────────────────────
+spacy>=3.7,<3.8
+https://github.com/explosion/spacy-models/releases/download/ro_core_news_sm-3.7.0/ro_core_news_sm-3.7.0-py3-none-any.whl
+
+# ── AI / Embeddings ───────────────────────────────────────────────────────────
+sentence-transformers
+
+# CPU-only PyTorch — avoids the 2 GB CUDA wheel on Streamlit Community Cloud
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+
+# CLIP text encoder (image search)
+transformers
+pillow
