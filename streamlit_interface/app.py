@@ -54,7 +54,7 @@ if "search_params" not in st.session_state:
 #  Routing
 # ─────────────────────────────────────────────
 if st.session_state.page == "home":
-    render_home(districts, proximity, DEFAULT_SERVER_URL, DATA_DIR)
+    render_home(districts, proximity, DEFAULT_SERVER_URL)
 elif st.session_state.page == "results":
     render_results()
 elif st.session_state.page == "analytics":

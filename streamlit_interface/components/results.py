@@ -1,10 +1,7 @@
 import streamlit as st
 import pandas as pd
-import sys
-import importlib
 import json
-from utils import safe_str, apply_filters, prepare_dataframe, apply_ai_scores, apply_price_fairness
-from image_embedder import embed_all_photos
+from utils import safe_str, apply_filters, apply_price_fairness
 from nlp_filters import apply_description_filters
 
 # Static mapping from spaCy filter key → (icon, Romanian label)
@@ -42,120 +39,9 @@ def _render_filter_pills(spacy_filters: dict):
         st.markdown(pills, unsafe_allow_html=True)
 
 
-def _load_more(params: dict, is_initial: bool = False):
-    """Re-run the scrape pipeline and update session state.
-    is_initial=True uses the user's original page selection;
-    is_initial=False (load-more button) adds 2 pages on top of what was scraped.
-    """
-    scrape_config = params["scrape_config"]
-    pages_scraped = params.get("pages_scraped", 1)
-    new_pages = scrape_config.get("pages", 1) if is_initial else pages_scraped + 2
-    data_dir = params.get("data_dir", "")
-
-    sys.path.insert(0, data_dir)
-    import extractor
-    importlib.reload(extractor)
-    from extractor import run_pipeline
-
-    # Build jobs with updated page count
-    jobs = [
-        {**job, "pages": new_pages}
-        for job in scrape_config.get("jobs", [])
-    ]
-
-    status_box = st.empty()
-    cards_box  = st.empty()
-    df_running = pd.DataFrame()
-    df_final   = pd.DataFrame()
-
-    for status, partial_df in run_pipeline(
-        jobs=jobs,
-        out_csv="results.csv",
-    ):
-        if status in ("db_cache", "progress") and not partial_df.empty:
-            df_running = pd.concat([df_running, prepare_dataframe(partial_df)], ignore_index=True)
-            status_box.info(f"🕷️ {len(df_running)} listings found so far…")
-            with cards_box.container():
-                render_property_cards(apply_filters(
-                    df_running,
-                    params.get("max_price", 0),
-                    params.get("rooms", "Any"),
-                    params.get("min_sqm", 0),
-                    params.get("max_sqm", 0),
-                    params.get("property_types"),
-                ))
-        elif status == "done":
-            df_final = partial_df
-
-    if df_final.empty:
-        status_box.warning("No new results found.")
-        return
-
-    df_final = prepare_dataframe(df_final)
-
-    # ── Merge with cached results (Firestore) ────────────────────────────────
-    cached_df = st.session_state.get("df", pd.DataFrame())
-    new_count = 0
-    url_col_new = "url" if "url" in df_final.columns else ("link" if "link" in df_final.columns else None)
-
-    if not cached_df.empty:
-        url_col_cached = "url" if "url" in cached_df.columns else ("link" if "link" in cached_df.columns else None)
-        if url_col_cached and url_col_new and url_col_cached == url_col_new:
-            # Cached rows take priority; drop scraped duplicates
-            existing_urls = set(cached_df[url_col_cached].dropna())
-            df_new_only = df_final[~df_final[url_col_new].isin(existing_urls)]
-            df_final = pd.concat([cached_df, df_new_only], ignore_index=True)
-        else:
-            df_new_only = df_final
-            df_final = pd.concat([cached_df, df_final], ignore_index=True)
-
-        new_count = len(df_new_only)
-        status_box.info(f"🔀 Combined: {len(cached_df)} cached + {new_count} new = {len(df_final)} total")
-    else:
-        df_new_only = df_final
-
-    # ── Embed all photos into image ChromaDB collection ──────────────────────
-    image_server_url = params.get("image_server_url", "")
-    if not df_new_only.empty and "image_urls" in df_new_only.columns and image_server_url:
-        with st.spinner(f"Embedding photos for {len(df_new_only)} new listings…"):
-            n_embedded, img_err = embed_all_photos(df_new_only, image_server_url)
-        if img_err:
-            st.warning(f"Image embedding: {img_err}")
-
-    spacy_filters = params.get("spacy_filters", {})
-    if spacy_filters:
-        df_final, _, _ = apply_description_filters(df_final, spacy_filters)
-
-    # Save merged (unranked) results and come back to rank on the next render
-    # so the user sees all listings before the AI re-ordering happens.
-    params["pages_scraped"] = new_pages
-    params["embedding_sorted"] = False
-    params["embed_error"] = None
-    params["_pending_rerank"] = True
-    st.session_state.search_params = params
-    st.session_state.df = df_final
-    if new_count > 0:
-        st.session_state["_scrape_toast"] = f"✅ Scraping done — {new_count} new listings added"
-    else:
-        st.session_state["_scrape_toast"] = "ℹ️ Scraping done — no new listings found"
-    st.rerun()
-
-
 def render_results():
     params = st.session_state.search_params
     df: pd.DataFrame = st.session_state.get("df", pd.DataFrame())
-
-    # ── Show scrape-done notification if set by _load_more ───────────────────
-    toast_msg = st.session_state.pop("_scrape_toast", None)
-    if toast_msg:
-        st.toast(toast_msg)
-
-    # Consume the flag early so it doesn't re-trigger on the next rerun,
-    # but remember it so we can start the scrape at the bottom of the page.
-    pending_scrape = params.get("pending_scrape", False)
-    if pending_scrape:
-        params["pending_scrape"] = False
-        st.session_state.search_params = params
 
     # ── Top bar ──
     col_back, col_logo, col_vibe = st.columns([0.8, 1, 4])
@@ -178,14 +64,9 @@ def render_results():
     if embed_error and not params.get("embedding_sorted", False):
         st.warning(f"AI ranking unavailable: {embed_error}", icon="⚠️")
 
-    if df.empty and not pending_scrape:
+    if df.empty:
         st.warning("No data loaded. Go back and try again.")
         st.stop()
-
-    # ── Scrape-only: skip the empty card view, go straight to live scraping ──
-    if pending_scrape and df.empty:
-        _load_more(params, is_initial=True)
-        return
 
     # ── Apply filters ──
     df_f = apply_filters(
@@ -218,49 +99,6 @@ def render_results():
         )
 
     render_property_cards(df_f)
-
-    # ── Cached+Scrape: show cached cards first, then trigger live scraping ────
-    if pending_scrape:
-        st.markdown("---")
-        _load_more(params, is_initial=True)
-        return
-
-    # ── Re-rank with AI after all results are visible ────────────────────────
-    if params.get("_pending_rerank") and params.get("vibe", "").strip():
-        params["_pending_rerank"] = False
-        st.session_state.search_params = params
-        vibe = params.get("vibe", "")
-        server_url = params.get("server_url", "")
-        url_col = "url" if "url" in df.columns else ("link" if "link" in df.columns else None)
-        if url_col:
-            with st.spinner("🧠 Re-ranking results by AI similarity…"):
-                df_ranked, embedding_sorted, embed_error = apply_ai_scores(
-                    df, vibe, server_url, url_col,
-                    skip_embed=True,
-                    spacy_filters=params.get("spacy_filters"),
-                    image_embedding=params.get("image_embedding"),
-                )
-            params["embedding_sorted"] = embedding_sorted
-            params["embed_error"] = embed_error
-            st.session_state.search_params = params
-            st.session_state.df = df_ranked
-            st.rerun()
-
-    # ── Load more ──────────────────────────────────────────────────────────────
-    scrape_config = params.get("scrape_config")
-    if scrape_config and scrape_config.get("olx_urls"):
-        pages_scraped = params.get("pages_scraped", 1)
-        st.markdown("---")
-        st.markdown(
-            f'<div style="text-align:center;color:#94a3b8;font-size:0.85rem;margin-bottom:0.5rem;">'
-            f'Showing results from page 1–{pages_scraped}. Want more?'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        _, btn_col, _ = st.columns([1, 2, 1])
-        with btn_col:
-            if st.button(f"🔄 Search pages {pages_scraped + 1}–{pages_scraped + 2}", use_container_width=True):
-                _load_more(params)
 
 def _parse_image_urls(raw) -> list:
     """Return a list of image dicts from a column value (JSON string or list)."""

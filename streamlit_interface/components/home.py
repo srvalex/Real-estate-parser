@@ -4,37 +4,10 @@ import pandas as pd
 import time
 from utils import prepare_dataframe, apply_filters, apply_ai_scores, apply_price_fairness
 from components.results import render_property_cards
-from nlp_filters import extract_filters, get_olx_keywords, apply_description_filters
-from scrapers import SCRAPERS
-
-def _inject_olx_keywords(urls: list[str], keywords: list[str]) -> list[str]:
-    """Insert a /q-keyword1-keyword2/ path segment into each OLX URL."""
-    if not keywords:
-        return urls
-    q_string = "q-" + "-".join(k.strip() for k in keywords if k.strip())
-    new_urls = []
-    for url in urls:
-        if "?" in url:
-            base, query_str = url.split("?", 1)
-            base = base if base.endswith("/") else base + "/"
-            new_urls.append(f"{base}{q_string}/?{query_str}")
-        else:
-            base = url if url.endswith("/") else url + "/"
-            new_urls.append(f"{base}{q_string}/")
-    return new_urls
+from nlp_filters import extract_filters, apply_description_filters
 
 
-
-def render_home(districts, proximity, server_url, data_dir):
-    image_server_url = os.environ.get("EMBED_SERVICE_URL", "")
-    if image_server_url:
-        st.session_state["image_server_url"] = image_server_url
-        # Fire a background ping so the Cloud Run container wakes up while
-        # the user fills the search form — avoids a cold-start delay on search.
-        if not st.session_state.get("_embed_warmed"):
-            from embedders.local_embedder import warmup_service
-            warmup_service(image_server_url)
-            st.session_state["_embed_warmed"] = True
+def render_home(districts, proximity, server_url):
 
     # ── Nav bar ──────────────────────────────────────────────────────────────
     _, nav_col, _ = st.columns([3, 1, 3])
@@ -157,40 +130,6 @@ def render_home(districts, proximity, server_url, data_dir):
                             proximity_selection.append(neighbor)
 
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-            pages = st.number_input("Pages per site", min_value=1, max_value=5, value=1)
-
-            # ── Build search URLs via scraper registry ────────────────────────
-            scrape_jobs = []
-            for scraper in SCRAPERS.values():
-                urls = set(scraper.build_search_urls(final_selection, districts, max_price, full_sectors=full_sectors, partial_by_sector=partial_by_sector))
-                if proximity_selection:
-                    # Proximity neighbours always get per-neighbourhood URLs
-                    urls |= set(scraper.build_search_urls(
-                        proximity_selection, districts, max_price, per_neighbourhood=True
-                    ))
-                scrape_jobs.append({
-                    "platform_id": scraper.platform_id,
-                    "urls":        list(urls),
-                    "pages":       pages,
-                })
-            scrape_config = {"jobs": scrape_jobs, "pages": pages}
-
-            # ── Debug: show generated URLs as toasts ──────────────────────────
-            with st.expander("🔗 Generated search URLs", expanded=False):
-                for job in scrape_jobs:
-                    st.markdown(f"**{job['platform_id'].upper()}** — {len(job['urls'])} URL(s)")
-                    for url in job["urls"]:
-                        st.code(url, language=None)
-
-            search_mode = st.radio(
-                "Search mode",
-                options=["⚡ Cached", "🔀 Cached + Scrape", "🕷️ Scrape only"],
-                index=0,
-                horizontal=True,
-                help="Cached = instant results from saved database · Scrape only = live scrape, no cache · Both = combine",
-            )
-            live_scrape = search_mode != "⚡ Cached"
-            scrape_only = search_mode == "🕷️ Scrape only"
 
             st.caption("✅ Supabase + pgvector search ready")
 
@@ -213,10 +152,6 @@ def render_home(districts, proximity, server_url, data_dir):
         if not final_selection:
             st.error("Please select at least one location to search.")
             st.stop()
-
-        import sys
-        import importlib
-        sys.path.insert(0, data_dir)
 
         df = None
 
@@ -256,30 +191,21 @@ def render_home(districts, proximity, server_url, data_dir):
         if _nlp_filled:
             st.toast(f"🤖 NLP completat: {', '.join(_nlp_filled)}", icon="🤖")
 
-        # ── Inject OLX keywords into scrape jobs ─────────────────────────────
-        if live_scrape:
-            url_filters = get_olx_keywords(spacy_filters)
-            if url_filters:
-                for job in scrape_config.get("jobs", []):
-                    if job["platform_id"] == "olx":
-                        job["urls"] = _inject_olx_keywords(job["urls"], url_filters)
+        # ── Query database ─────────────────────────────────────────────────────
+        with st.spinner("⚡ Loading listings from database…"):
+            from db_utils import query_listings_by_district
+            records = query_listings_by_district(final_selection)
 
-        # ── Fast path: query Firestore (skipped in scrape-only mode) ─────────
-        if not scrape_only:
-            with st.spinner("⚡ Loading listings from database…"):
-                from db_utils import query_listings_by_district
-                records = query_listings_by_district(final_selection)
+        if records:
+            df = prepare_dataframe(pd.DataFrame(records))
+            df = apply_filters(df, max_price, rooms, min_sqm, max_sqm, property_types or None)
+            df = apply_price_fairness(df)
+            st.toast(f"⚡ {len(df)} listings loaded from database", icon="✅")
+        else:
+            st.warning("No saved listings found for the selected zones.")
 
-            if records:
-                df = prepare_dataframe(pd.DataFrame(records))
-                df = apply_filters(df, max_price, rooms, min_sqm, max_sqm, property_types or None)
-                df = apply_price_fairness(df)
-                st.toast(f"⚡ {len(df)} listings loaded from database", icon="✅")
-            else:
-                st.warning("No saved listings found for the selected zones. Falling back to live scraping.")
-
-        if not scrape_only and (df is None or df.empty):
-            st.error("No listings found. Try different zones or enable live scraping.")
+        if df is None or df.empty:
+            st.error("No listings found. Try different zones.")
             st.stop()
 
         embedding_sorted = False
@@ -326,31 +252,6 @@ def render_home(districts, proximity, server_url, data_dir):
             else:
                 st.toast("⚠️ Could not load template photo embeddings — falling back to text search", icon="⚠️")
 
-        if scrape_only:
-            # Navigate straight to results — scraping and ranking happen there
-            st.session_state.search_params = {
-                "vibe":             vibe,
-                "max_price":        max_price,
-                "rooms":            rooms,
-                "min_sqm":          min_sqm,
-                "max_sqm":          max_sqm,
-                "property_types":   property_types or None,
-                "spacy_filters":    spacy_filters,
-                "embedding_sorted": False,
-                "embed_error":      None,
-                "scrape_config":    scrape_config,
-                "pages_scraped":    scrape_config.get("pages", 1) if scrape_config else 0,
-                "server_url":       server_url,
-                "image_server_url": st.session_state.get("image_server_url", ""),
-                "image_embedding":  image_embedding,
-                "data_dir":         data_dir,
-                "pending_scrape":   True,
-            }
-            st.session_state.df = pd.DataFrame()
-            st.session_state.page = "results"
-            st.rerun()
-
-        # ── Cached / Cached+Scrape: show results immediately then rank ────────
         if spacy_filters:
             df, excluded_count, exclusion_summary = apply_description_filters(df, spacy_filters)
             if excluded_count:
@@ -398,12 +299,8 @@ def render_home(districts, proximity, server_url, data_dir):
             "spacy_filters":    spacy_filters,
             "embedding_sorted": embedding_sorted,
             "embed_error":      embed_error,
-            "scrape_config":    scrape_config,
-            "pages_scraped":    scrape_config.get("pages", 1) if scrape_config else 0,
             "server_url":       server_url,
             "image_embedding":  image_embedding,
-            "data_dir":         data_dir,
-            "pending_scrape":   live_scrape and bool(scrape_config and any(j["urls"] for j in scrape_config.get("jobs", []))),
         }
         st.session_state.df = df
         st.session_state.page = "results"
