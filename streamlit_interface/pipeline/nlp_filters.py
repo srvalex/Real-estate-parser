@@ -146,7 +146,7 @@ def extract_filters(text: str) -> dict:
 
     Returns:
         e.g. {"ROOM_COUNT": "2", "LOCATION_SECTOR": "4", "HAS_METRO": True,
-              "PROPERTY_TYPE": "Garsonieră", "AREA_MIN": 50}
+              "PROPERTY_TYPE": "Garsoniera", "AREA_MIN": 50}
     """
     import re as _re
     doc = nlp(text.lower())
@@ -189,10 +189,12 @@ def extract_filters(text: str) -> dict:
 
     # 5. Property type — keyword matching
     if "PROPERTY_TYPE" not in found:
-        if any(w in lowered for w in ("garsonier", "studio", "garconiera", "garçonieră")):
-            found["PROPERTY_TYPE"] = "Garsonieră"
+        if any(w in lowered for w in ("garsonier", "garconiera", "garçonieră")):
+            found["PROPERTY_TYPE"] = "Garsoniera"
+        elif "studio" in lowered:
+            found["PROPERTY_TYPE"] = "Studio"
         elif any(w in lowered for w in ("casă", "casa", "vilă", "vila", "duplex")):
-            found["PROPERTY_TYPE"] = "Casă / Vilă"
+            found["PROPERTY_TYPE"] = "Casa/Vila"
         elif "apartament" in lowered:
             found["PROPERTY_TYPE"] = "Apartament"
 

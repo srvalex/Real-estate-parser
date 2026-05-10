@@ -1,6 +1,6 @@
 ================================================================================
 ROMANIAN REAL ESTATE PARSER — TECHNICAL DOCUMENTATION
-Last updated: May 2026
+Last updated: May 2026 (Milestone 19)
 ================================================================================
 
 PROJECT SUMMARY
@@ -240,6 +240,8 @@ Supabase (Postgres + pgvector) — PRIMARY DATABASE (as of April 2026)
     area_sqm FLOAT — parsed from raw area string
     image_urls JSONB — [{thumbnail, small, medium, large}, ...]
     extras JSONB — platform-specific fields (Storia building details etc.)
+    property_type TEXT — "Apartament" | "Garsonieră" | "Casă / Vilă"
+                         inferred from title at upsert time by _clean_record()
     embedding vector(384) — SentenceTransformer embedding of description/title
     is_available INTEGER — 1=live, 0=expired, -1=blocked/transient
     first_seen_at / last_seen_at TIMESTAMPTZ — for listing age tracking
@@ -525,6 +527,39 @@ Files: crawler.py (run_embedding_backfill, _get_embed_auth_header),
   Streamlit Interface/embedders/image_embedder.py (clip_encode_text),
   Streamlit Interface/pipeline/utils.py (apply_ai_scores image path),
   requirements-crawler.txt, embedding-service/Dockerfile
+
+
+[MILESTONE 19] Bug fix — analytics property_type gap
+------------------------------------------------------
+Summary: The Market Analytics dashboard was not showing any new listings despite
+  new data arriving from the crawler every 2 hours. Hitting the Refresh button
+  (which calls st.cache_data.clear()) had no effect because the data simply wasn't
+  in the query results to begin with.
+
+Root cause (two gaps in db_utils.py):
+  1. `property_type` was missing from _CANONICAL_COLUMNS. _clean_record() strips
+     every key not in that set before upserting, so any `property_type` value
+     passed in was silently dropped on every save.
+  2. None of the scrapers (OLX, Storia, Imobiliare) set `property_type` in their
+     output dicts. Combined with gap 1, all new listings landed in Supabase with
+     property_type = NULL.
+  fetch_analytics_data() filters to `is_available=1 AND property_type IS NOT NULL`,
+  so NULL rows were invisible to analytics regardless of how fresh they were.
+  Existing rows visible in analytics were written before this gap was introduced.
+
+Fix (db_utils.py):
+  1. Added `"property_type"` to _CANONICAL_COLUMNS so the column survives upserts.
+  2. Added inference logic at the end of _clean_record(): if property_type is not
+     already set, the listing title is normalised (lowercase + diacritics stripped)
+     and matched against keyword patterns:
+       - "garsonier" / "studio"    → "Garsonieră"
+       - "casa" / "vila" / "duplex" → "Casă / Vilă"
+       - any other titled listing   → "Apartament" (safe default — all three
+         scrapers target apartment/garsoniere search categories only)
+  All new listings from the next crawler run onwards will have property_type set
+  and appear in analytics. Existing NULL rows will be backfilled on their next
+  upsert (e.g. availability check).
+Files: db_utils.py (_CANONICAL_COLUMNS, _clean_record step 6)
 
 
 ================================================================================

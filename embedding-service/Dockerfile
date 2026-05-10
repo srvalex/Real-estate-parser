@@ -28,7 +28,6 @@ from transformers import CLIPModel, CLIPProcessor; \
 CLIPModel.from_pretrained('openai/clip-vit-base-patch32'); \
 CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32')"
 
-COPY embedding-service/main.py .
 COPY embedding-service/embed_job.py .
 COPY db_utils.py .
 

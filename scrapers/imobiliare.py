@@ -293,6 +293,21 @@ class ImobiliareRoScraper(PlatformScraper):
                 m = re.search(r"-(\d+)$", url.rstrip("/"))
                 source_id = m.group(1) if m else ""
 
+            # ── Property type from URL path ────────────────────────────────────
+            # Imobiliare encodes the property category in the URL:
+            #   /inchirieri-apartamente/ → "Apartament"
+            #   /inchirieri-garsoniere/  → "Garsoniera"
+            #   /inchirieri-case-vile/   → "Casa/Vila"
+            _URL_TYPE_MAP = {
+                "inchirieri-apartamente": "Apartament",
+                "inchirieri-garsoniere":  "Garsoniera",
+                "inchirieri-case-vile":   "Casa/Vila",
+            }
+            property_type = next(
+                (pt for seg, pt in _URL_TYPE_MAP.items() if seg in url),
+                None,
+            )
+
             raw_images = product.get("image", [])
             image_urls = []
             for img in raw_images:
@@ -337,7 +352,7 @@ class ImobiliareRoScraper(PlatformScraper):
                 if k not in _USED_DL and v not in (None, "", [], {}):
                     extras[k] = v
 
-            return {
+            result = {
                 "platform_id":        self.platform_id,
                 "platform":           self.display_name,
                 "source_id":          source_id,
@@ -354,6 +369,9 @@ class ImobiliareRoScraper(PlatformScraper):
                 "image_urls":         image_urls,
                 "extras":             extras if extras else None,
             }
+            if property_type:
+                result["property_type"] = property_type
+            return result
 
         except Exception as e:
             print(f"  [imobiliare parse error] {url}: {e}")

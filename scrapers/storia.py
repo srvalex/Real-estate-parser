@@ -213,6 +213,27 @@ class StoriaScraper(PlatformScraper):
             result["price_eur"] = result.get("price", "")
             result["rent"] = result.get("price", "")   # backward compat
 
+            # Property type from top-level estate field in __NEXT_DATA__ ad object.
+            # OLX-group platforms (Storia is OLX Group) expose estate as e.g.
+            # "FLAT", "STUDIO", "HOUSE" at the ad level, not in characteristics.
+            _ESTATE_MAP = {
+                "flat":        "Apartament",
+                "apartment":   "Apartament",
+                "apartament":  "Apartament",
+                "studio":      "Studio",
+                "garsoniera":  "Garsoniera",
+                "garsonieră":  "Garsoniera",
+                "house":       "Casa/Vila",
+                "houses":      "Casa/Vila",
+                "casa":        "Casa/Vila",
+                "vila":        "Casa/Vila",
+            }
+            estate_raw = data.get("estate", "")
+            if estate_raw:
+                result["property_type"] = _ESTATE_MAP.get(
+                    str(estate_raw).lower(), str(estate_raw)
+                )
+
             return result
         except Exception as e:
             print(f"  [storia parse error] {e}")

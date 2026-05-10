@@ -77,7 +77,7 @@ def render_home(districts, proximity, server_url):
                     help="Filtrează după numărul de camere",
                 )
             with fcol2:
-                property_types_opts = ["Apartament", "Garsonieră", "Casă / Vilă"]
+                property_types_opts = ["Apartament", "Garsoniera", "Studio", "Casa/Vila"]
                 property_types = st.multiselect(
                     "Tip proprietate",
                     options=property_types_opts,
@@ -157,7 +157,7 @@ def render_home(districts, proximity, server_url):
 
         # ── NLP auto-fill: use detected values for any field left at default ──
         # Form always wins; NLP only fills in fields the user didn't touch.
-        _ALL_PTYPES = ["Apartament", "Garsonieră", "Casă / Vilă"]
+        _ALL_PTYPES = ["Apartament", "Garsoniera", "Studio", "Casa/Vila"]
         _nlp_filled = []
 
         if rooms == "Any" and spacy_filters.get("ROOM_COUNT"):

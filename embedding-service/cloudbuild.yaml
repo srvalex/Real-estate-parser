@@ -5,10 +5,10 @@ steps:
       - -f
       - embedding-service/Dockerfile
       - -t
-      - europe-west1-docker.pkg.dev/your-gcp-project-id/repo-crawler/embedder:latest
+      - europe-west1-docker.pkg.dev/$PROJECT_ID/repo-crawler/embedder:latest
       - .
 images:
-  - europe-west1-docker.pkg.dev/your-gcp-project-id/repo-crawler/embedder:latest
+  - europe-west1-docker.pkg.dev/$PROJECT_ID/repo-crawler/embedder:latest
 options:
   machineType: E2_HIGHCPU_8
   diskSizeGb: 50

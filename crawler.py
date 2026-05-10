@@ -18,7 +18,7 @@ proxies.txt format (one proxy per line, lines starting with # are ignored):
 
 Windows Task Scheduler (incremental every 2h):
   Program: python
-  Arguments: D:\My weekend project\crawler.py --mode incremental --proxy-file proxies.txt
+  Arguments: D:\\My weekend project\\crawler.py --mode incremental --proxy-file proxies.txt
 """
 
 import argparse
@@ -467,19 +467,22 @@ def _trigger_embedder_job() -> None:
     GOOGLE_APPLICATION_CREDENTIALS key file locally).
     Fails silently — the job will be retried on the next crawl run anyway.
     """
-    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
-    region  = "europe-west1"
-    job     = "embedder-job"
-    url     = (
-        f"https://run.googleapis.com/v2/projects/{project}"
-        f"/locations/{region}/jobs/{job}:run"
-    )
+    region = "europe-west1"
+    job    = "embedder-job"
     try:
         import google.auth
         import google.auth.transport.requests as ga_req
         import requests as _req
-        creds, _ = google.auth.default(
+        creds, detected_project = google.auth.default(
             scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT", "") or detected_project or ""
+        if not project:
+            print("[embed-trigger] no project ID — set GOOGLE_CLOUD_PROJECT env var", flush=True)
+            return
+        url = (
+            f"https://run.googleapis.com/v2/projects/{project}"
+            f"/locations/{region}/jobs/{job}:run"
         )
         creds.refresh(ga_req.Request())
         resp = _req.post(

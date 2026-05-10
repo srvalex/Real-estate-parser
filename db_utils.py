@@ -41,6 +41,7 @@ _CANONICAL_COLUMNS = frozenset({
     "district", "location_full",
     "rooms", "area_sqm", "floor", "total_floors", "year_built", "heating",
     "features", "image_urls", "extras",
+    "property_type",
     "is_available", "scraped_at", "first_seen_at", "last_seen_at",
     "embedding", "image_embedding",
 })
@@ -145,7 +146,23 @@ def _clean_record(item: dict) -> dict | None:
         if vec_col in clean and isinstance(clean[vec_col], list):
             clean[vec_col] = "[" + ",".join(str(float(v)) for v in clean[vec_col]) + "]"
 
-    # 6. Strip columns that don't exist in the canonical schema
+    # 6. property_type: infer from title when not explicitly set by the scraper
+    if not clean.get("property_type"):
+        title_norm = (
+            str(clean.get("title", "")).lower()
+            .replace("ă", "a").replace("î", "i").replace("â", "a")
+            .replace("ș", "s").replace("ț", "t")
+        )
+        if any(kw in title_norm for kw in ("garsonier",)):
+            clean["property_type"] = "Garsoniera"
+        elif "studio" in title_norm:
+            clean["property_type"] = "Studio"
+        elif any(kw in title_norm for kw in ("casa", "vila", "duplex")):
+            clean["property_type"] = "Casa/Vila"
+        elif clean.get("title"):
+            clean["property_type"] = "Apartament"
+
+    # 7. Strip columns that don't exist in the canonical schema
     return {k: v for k, v in clean.items() if k in _CANONICAL_COLUMNS}
 
 
@@ -432,6 +449,7 @@ def get_listings_missing_image_embedding(limit: int = 50, table: str = "listings
             .eq("is_available", 1)
             .not_.is_("image_urls", "null")
             .is_("image_embedding", "null")
+            .order("scraped_at", desc=True)
             .limit(limit)
             .execute()
         )
