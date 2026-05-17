@@ -332,18 +332,25 @@ def get_listings_for_availability_check(platform_id: str | None = None) -> list[
 def batch_update_availability(updates: list[dict]) -> int:
     """Bulk-update is_available for a list of {url, is_available} dicts.
 
-    Uses upsert on_conflict=url so only is_available is touched; all other
-    columns remain unchanged.  Returns the number of rows processed.
+    Uses UPDATE ... WHERE url IN (...) grouped by status value so only
+    is_available is touched and no NOT-NULL columns are at risk.
+    Returns the number of rows processed.
     """
     if not updates:
         return 0
+    from collections import defaultdict
     client = get_client()
     total = 0
     CHUNK = 500
     for i in range(0, len(updates), CHUNK):
         chunk = updates[i : i + CHUNK]
+        # One UPDATE per distinct is_available value (typically just 0 and 1).
+        by_status: dict[int, list[str]] = defaultdict(list)
+        for row in chunk:
+            by_status[row["is_available"]].append(row["url"])
         try:
-            client.table("listings").upsert(chunk, on_conflict="url").execute()
+            for status, urls in by_status.items():
+                client.table("listings").update({"is_available": status}).in_("url", urls).execute()
             total += len(chunk)
         except Exception as e:
             print(f"  [supabase] batch_update_availability failed: {e}")

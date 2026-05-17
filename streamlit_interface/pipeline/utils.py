@@ -220,6 +220,13 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
     if not final_scores:
         return df, False, embed_error
 
+    # Normalise to [0, 1] so the UI percentage is meaningful.
+    # RRF raw values are tiny (~0.016 max), so without this the badge always reads "1%".
+    # Dividing by the top score makes the best result 100% and others proportional to it.
+    _max = max(final_scores.values())
+    if _max > 0:
+        final_scores = {url: s / _max for url, s in final_scores.items()}
+
     df["_similarity_score"] = df[url_col].map(final_scores)
     df = df.sort_values("_similarity_score", ascending=False, na_position="last").reset_index(drop=True)
     return df, True, embed_error
