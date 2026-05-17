@@ -9,13 +9,6 @@ from nlp_filters import extract_filters, apply_description_filters
 
 def render_home(districts, proximity, server_url):
 
-    # ── Nav bar ──────────────────────────────────────────────────────────────
-    _, nav_col, _ = st.columns([3, 1, 3])
-    with nav_col:
-        if st.button("📊 Market Analytics", use_container_width=True):
-            st.session_state.page = "analytics"
-            st.rerun()
-
     # Hero
     st.markdown("""
     <div class="home-hero">
@@ -192,9 +185,13 @@ def render_home(districts, proximity, server_url):
             st.toast(f"🤖 NLP completat: {', '.join(_nlp_filled)}", icon="🤖")
 
         # ── Query database ─────────────────────────────────────────────────────
+        all_districts = final_selection + proximity_selection
         with st.spinner("⚡ Loading listings from database…"):
             from db_utils import query_listings_by_district
-            records = query_listings_by_district(final_selection)
+            records = query_listings_by_district(all_districts)
+
+        if proximity_selection:
+            st.toast(f"🔍 Proximity search added {len(proximity_selection)} nearby neighbourhood(s)", icon="🔍")
 
         if records:
             df = prepare_dataframe(pd.DataFrame(records))
@@ -267,8 +264,9 @@ def render_home(districts, proximity, server_url):
         live_cards  = st.empty()
 
         live_status.info(f"⚡ Found **{len(df)}** listings — running AI ranking…")
+        _prox_set = set(proximity_selection) or None
         with live_cards.container():
-            render_property_cards(df)
+            render_property_cards(df, proximity_districts=_prox_set)
 
         if (vibe.strip() or image_embedding) and url_col:
             df, embedding_sorted, embed_error = apply_ai_scores(
@@ -281,7 +279,7 @@ def render_home(districts, proximity, server_url):
             if embedding_sorted:
                 live_status.success(f"🎯 AI ranked **{len(df)}** listings — navigating to results…")
                 with live_cards.container():
-                    render_property_cards(df)
+                    render_property_cards(df, proximity_districts=_prox_set)
                 time.sleep(1.5)
             elif embed_error:
                 st.toast(f"⚠️ AI ranking skipped: {embed_error}", icon="⚠️")
@@ -290,17 +288,18 @@ def render_home(districts, proximity, server_url):
                 live_status.warning("⚠️ No AI scores returned — showing unordered results.")
 
         st.session_state.search_params = {
-            "vibe":             vibe,
-            "max_price":        max_price,
-            "rooms":            rooms,
-            "min_sqm":          min_sqm,
-            "max_sqm":          max_sqm,
-            "property_types":   property_types or None,
-            "spacy_filters":    spacy_filters,
-            "embedding_sorted": embedding_sorted,
-            "embed_error":      embed_error,
-            "server_url":       server_url,
-            "image_embedding":  image_embedding,
+            "vibe":                vibe,
+            "max_price":           max_price,
+            "rooms":               rooms,
+            "min_sqm":             min_sqm,
+            "max_sqm":             max_sqm,
+            "property_types":      property_types or None,
+            "spacy_filters":       spacy_filters,
+            "embedding_sorted":    embedding_sorted,
+            "embed_error":         embed_error,
+            "server_url":          server_url,
+            "image_embedding":     image_embedding,
+            "proximity_selection": proximity_selection,
         }
         st.session_state.df = df
         st.session_state.page = "results"

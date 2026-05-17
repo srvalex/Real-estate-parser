@@ -18,7 +18,6 @@ from utils import load_geo_data
 from styles import inject_custom_css
 from components.home import render_home
 from components.results import render_results
-from components.analytics import render_analytics
 from local_embedder import DEFAULT_SERVER_URL
 
 # ─────────────────────────────────────────────
@@ -28,7 +27,7 @@ st.set_page_config(
     page_title="Property Explorer",
     page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ─────────────────────────────────────────────
@@ -57,5 +56,3 @@ if st.session_state.page == "home":
     render_home(districts, proximity, DEFAULT_SERVER_URL)
 elif st.session_state.page == "results":
     render_results()
-elif st.session_state.page == "analytics":
-    render_analytics()

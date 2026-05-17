@@ -105,12 +105,28 @@ def apply_filters(
     return df
 
 def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, skip_embed: bool = False, spacy_filters: dict = None, image_embedding: list = None):
-    """Re-sort df by AI similarity score.
+    """Re-sort df by AI similarity score using Reciprocal Rank Fusion (RRF).
+
+    Two independent search paths are run against Supabase pgvector:
+      - Text:  paraphrase-multilingual-MiniLM-L12-v2 (384-dim) → match_listings RPC
+      - Image: CLIP ViT-B/32 text tower (512-dim)              → match_listings_by_image RPC
+
+    Because the two models live in different vector spaces with different score
+    distributions, their raw cosine similarities cannot be meaningfully averaged.
+    RRF fuses them via ordinal rank instead of raw score:
+
+        rrf(url) = W_TEXT  / (K + text_rank(url))
+                 + W_IMAGE / (K + image_rank(url))
+
+    K=60 (standard constant) dampens the advantage of rank-1 over rank-2 while
+    still strongly preferring anything near the top of either list. URLs absent
+    from a ranked list contribute 0 for that component (infinite rank).
+
     Supports three modes:
-      - text only (image_embedding=None, vibe set)
-      - image only (image_embedding set, vibe empty)
-      - both (image_embedding set, vibe set) → weighted fusion
-    Returns (df, embedding_sorted, embed_error).
+      - text only   (image_embedding=None, vibe set)
+      - image only  (image_embedding set,  vibe empty)
+      - both        (image_embedding set,  vibe set) → RRF fusion
+    Returns (df_sorted, embedding_sorted: bool, embed_error: str | None).
     """
     hard_filter_keys = [k for k, v in (spacy_filters or {}).items() if v is True]
     embed_error = None
@@ -164,23 +180,42 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
     if not text_scores and not image_scores:
         return df, False, embed_error
 
-    # ── Fuse scores ───────────────────────────────────────────────────────────
-    # image-only: pure image score
-    # text-only:  pure text score
-    # both:       20% text + 80% image for listings with image embeddings;
-    #             text-only for listings without image embeddings (no penalty)
-    all_urls = set(df[url_col].dropna())
+    # ── Reciprocal Rank Fusion ────────────────────────────────────────────────
+    # Raw cosine similarities from ST (384-dim) and CLIP (512-dim) are not
+    # comparable — different models, different score distributions. RRF fuses
+    # them purely by ordinal rank, making the weights scale-independent.
+    #
+    #   rrf(url) = W_TEXT / (K + text_rank) + W_IMAGE / (K + image_rank)
+    #
+    # Tune W_TEXT / W_IMAGE to shift emphasis between description semantics
+    # and visual appearance. K=60 is the standard dampening constant.
+    _K       = 60
+    _W_TEXT  = 0.3
+    _W_IMAGE = 0.7
 
+    def _rank_map(scores: dict) -> dict:
+        return {
+            url: rank
+            for rank, (url, _) in enumerate(
+                sorted(scores.items(), key=lambda x: x[1], reverse=True), start=1
+            )
+        }
+
+    text_ranks  = _rank_map(text_scores)  if text_scores  else {}
+    image_ranks = _rank_map(image_scores) if image_scores else {}
+
+    all_urls = set(df[url_col].dropna())
     final_scores: dict = {}
     for url in all_urls:
-        t = text_scores.get(url)
-        i = image_scores.get(url)
-        if t is not None and i is not None:
-            final_scores[url] = 0.2 * t + 0.8 * i
-        elif i is not None:
-            final_scores[url] = i
-        elif t is not None:
-            final_scores[url] = t
+        t_rank = text_ranks.get(url)
+        i_rank = image_ranks.get(url)
+        score  = 0.0
+        if t_rank is not None:
+            score += _W_TEXT  / (_K + t_rank)
+        if i_rank is not None:
+            score += _W_IMAGE / (_K + i_rank)
+        if score > 0:
+            final_scores[url] = score
 
     if not final_scores:
         return df, False, embed_error

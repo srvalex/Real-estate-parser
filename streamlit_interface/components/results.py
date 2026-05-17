@@ -98,7 +98,8 @@ def render_results():
             unsafe_allow_html=True,
         )
 
-    render_property_cards(df_f)
+    proximity_districts = set(params.get("proximity_selection") or [])
+    render_property_cards(df_f, proximity_districts=proximity_districts or None)
 
 def _parse_image_urls(raw) -> list:
     """Return a list of image dicts from a column value (JSON string or list)."""
@@ -151,7 +152,7 @@ def _build_image_html(images: list) -> str:
     return cover_html + strip_html
 
 
-def render_property_cards(df_f):
+def render_property_cards(df_f, proximity_districts=None):
     if df_f.empty:
         st.markdown("""
         <div class="no-results">
@@ -209,6 +210,14 @@ def render_property_cards(df_f):
                 if sqm:       chips += f'<span class="meta-chip">📐 {sqm}</span>'
                 loc_label = district or location[:30]
                 if loc_label: chips += f'<span class="meta-chip">📍 {loc_label}</span>'
+                raw_district = safe_str(row.get("district", ""))
+                if proximity_districts and raw_district in proximity_districts:
+                    chips += (
+                        '<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;'
+                        'border:1px solid #7c3aed55;border-radius:6px;'
+                        'padding:2px 8px;font-size:0.72rem;font-weight:600;margin-left:2px;">'
+                        '🔍 nearby</span>'
+                    )
 
                 # ── Price fairness badge ─────────────────────────────────
                 fairness = safe_str(row.get("price_fairness", ""))

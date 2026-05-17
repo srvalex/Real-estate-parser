@@ -16,7 +16,6 @@ _BG      = "#0d0f1a"
 _PLOT_BG = "#13162a"
 _TEXT    = "#cbd5e1"
 _GRID    = "#1e2235"
-_PURPLE  = "#7c3aed"
 _VIOLET  = "#a78bfa"
 _TEAL    = "#2dd4bf"
 _AMBER   = "#fbbf24"
@@ -316,8 +315,7 @@ def render_analytics():
     col_back, col_title, col_refresh = st.columns([0.6, 3, 0.6])
     with col_back:
         if st.button("← Back"):
-            st.session_state.page = "home"
-            st.rerun()
+            st.switch_page("app.py")
     with col_title:
         st.markdown(
             '<h2 style="margin:0;color:#e2e8f0;font-size:1.4rem;font-weight:700;">'

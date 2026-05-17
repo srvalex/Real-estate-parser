@@ -7,7 +7,14 @@ def inject_custom_css():
 
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stApp { background: #0d0f1a; }
-#MainMenu, footer, header { visibility: hidden; }
+#MainMenu, footer { visibility: hidden; }
+/* Hide Streamlit's top toolbar chrome without touching the header element itself,
+   so the sidebar expand/collapse control is never accidentally hidden. */
+[data-testid="stToolbarActions"],
+[data-testid="stStatusWidget"],
+.stDeployButton { visibility: hidden; }
+/* Match header background to app so any remaining chrome is invisible */
+[data-testid="stHeader"] { background: #0d0f1a !important; border-bottom: 1px solid #1e2235 !important; }
 
 /* ── Prevent Streamlit's running-state fade ── */
 [data-stale="true"], .stStale { opacity: 1 !important; transition: none !important; }

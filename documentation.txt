@@ -1,6 +1,6 @@
 ================================================================================
 ROMANIAN REAL ESTATE PARSER — TECHNICAL DOCUMENTATION
-Last updated: May 2026 (Milestone 19)
+Last updated: May 2026 (Milestone 21)
 ================================================================================
 
 PROJECT SUMMARY
@@ -562,6 +562,94 @@ Fix (db_utils.py):
 Files: db_utils.py (_CANONICAL_COLUMNS, _clean_record step 6)
 
 
+[MILESTONE 20] Recommendation system — Reciprocal Rank Fusion (RRF)
+--------------------------------------------------------------------
+Summary: Replaced the raw weighted-average score fusion in apply_ai_scores()
+  with Reciprocal Rank Fusion (RRF). The previous fusion (0.2 × text_score +
+  0.8 × image_score) mixed cosine similarities from two incomparable vector
+  spaces, producing a statistically uncalibrated composite score.
+
+Problem with the old approach:
+  - SentenceTransformer (384-dim) and CLIP (512-dim) are trained with different
+    objectives and produce cosine similarities on different scales:
+      ST text scores:   typically 0.4 – 0.8  (a "great" match ≈ 0.75)
+      CLIP img scores:  typically 0.15 – 0.35 (a "great" match ≈ 0.33)
+  - A raw weighted average of numbers from different distributions is not
+    meaningful — the 80% weight on image was doubly dominant because CLIP scores
+    also happen to land lower numerically, further drowning out the text signal.
+  - Example: 0.2×0.75 + 0.8×0.33 = 0.15 + 0.264 = 0.414. The ST signal
+    (highest possible: 0.15) could not materially affect final rank regardless
+    of how strong the description match was.
+
+RRF formula:
+  rrf(url) = W_TEXT  / (K + text_rank(url))
+           + W_IMAGE / (K + image_rank(url))
+
+  where rank(url) is the listing's position (1 = best) within each model's
+  result set, sorted by raw cosine similarity descending. URLs absent from a
+  ranked list contribute 0 for that component (treated as infinite rank).
+
+Constants (tunable in utils.py):
+  K       = 60   — standard dampening constant; prevents rank-1 from having a
+                   disproportionate advantage over rank-2 while still strongly
+                   preferring anything near the top of either list.
+  W_TEXT  = 0.3  — weight for SentenceTransformer description-match ranking.
+                   Slightly higher than the old 0.2 because RRF no longer needs
+                   to compensate for scale differences between the two models.
+  W_IMAGE = 0.7  — weight for CLIP visual-similarity ranking.
+
+Why RRF over percentile normalisation:
+  - Percentile normalisation maps raw scores linearly to [0,1] within the result
+    set. This loses the shape of the score distribution — a cluster of near-equal
+    scores at the top gets artificially spread out.
+  - Percentile is also sensitive to result set size mismatch (text returns 200,
+    image returns 3000 — a listing ranked 150th looks equally mediocre in both
+    but covers 75% vs 5% of each set respectively).
+  - RRF is purely ordinal — only position integers matter, not raw values.
+    The sublinear 1/(K+rank) curve naturally reflects that being in the top 5 is
+    a strong signal and the difference between rank 200 and 201 is noise.
+    It requires zero calibration and stays valid as score distributions shift.
+
+Behaviour by mode (unchanged from caller's perspective):
+  - text only:   pure ST rank score (W_TEXT / (K + text_rank))
+  - image only:  pure CLIP rank score (W_IMAGE / (K + image_rank))
+  - both:        RRF sum of both components; listings absent from one list are
+                 not penalised — they simply don't receive that component's score.
+
+Files: Streamlit Interface/pipeline/utils.py (apply_ai_scores — _rank_map
+  helper, fusion block replacing raw weighted average; docstring updated)
+
+
+[MILESTONE 21] Proximity search
+---------------------------------
+Summary: Allows users to search not only the neighbourhoods they explicitly select
+  but also their immediate neighbours — without having to name them. Useful when a
+  user wants listings "around Floreasca" or "near the centre" without knowing all
+  adjacent area names.
+
+Algorithm:
+  1. proximity.json maps each neighbourhood to a hand-curated list of adjacent
+     neighbourhoods (e.g. Aviatiei → [Baneasa, Pipera, Aviatorilor, Floreasca]).
+  2. The home page exposes a toggle "🔍 Activare Proximity Search". When enabled,
+     the app iterates over every explicitly selected neighbourhood and collects its
+     adjacency list from proximity.json, de-duplicating against the primary selection.
+  3. The combined list (primary + proximity) is passed to query_listings_by_district()
+     in a single Supabase query — the DB sees no distinction between the two sets.
+  4. proximity_selection is stored in search_params and passed through to the card
+     renderer. Cards whose district falls in proximity_selection (but not in the
+     primary selection) display a purple "🔍 nearby" badge so users can distinguish
+     proximity results from exact-match results.
+  5. A toast confirms how many extra neighbourhoods were added when search runs.
+
+Data file: streamlit_interface/proximity.json — 100+ entries covering all major
+  Bucharest neighbourhoods. Adjacency is symmetric where geographically correct
+  but maintained manually (not computed from coordinates).
+Files: streamlit_interface/proximity.json,
+  streamlit_interface/components/home.py (proximity toggle, combined query, badge pass-through),
+  streamlit_interface/components/results.py (render_property_cards proximity_districts param,
+  "nearby" badge HTML)
+
+
 ================================================================================
 ROADMAP SUMMARY (as of May 2026)
 ================================================================================
@@ -574,5 +662,7 @@ P4  Cloud embedding service      DONE — working, gVisor pre-import fix applied
 P4  Streamlit app hosting        Not started — Streamlit Community Cloud or Cloud Run
 P4  Modal.com CLIP server        Not started (lower priority — /embed already in cloud service)
 M3  Price fairness indicator      DONE — (district, rooms) avg comparison badge on cards
+M3  Recommendation system (RRF)  DONE — Reciprocal Rank Fusion replaces raw score average; scale-independent, no calibration needed
+M3  Proximity search              DONE — adjacency map, combined DB query, "nearby" card badge
 M3  Other user features          Photo upload, listing age, price drop alerts
 M4  Monetisation                 Interaction logging, swipe mode, quality scoring
