@@ -11,16 +11,16 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-# ── Plotly dark theme matching the app ───────────────────────────────────────
-_BG      = "#0d0f1a"
-_PLOT_BG = "#13162a"
-_TEXT    = "#cbd5e1"
-_GRID    = "#1e2235"
-_VIOLET  = "#a78bfa"
-_TEAL    = "#2dd4bf"
-_AMBER   = "#fbbf24"
-_ROSE    = "#f87171"
-_PALETTE = [_VIOLET, _TEAL, _AMBER, _ROSE, "#60a5fa", "#34d399", "#fb923c"]
+# ── Plotly theme — dark grey + emerald ───────────────────────────────────────
+_BG      = "#1a1f26"
+_PLOT_BG = "#232830"
+_TEXT    = "#b0c4be"
+_GRID    = "#2d3440"
+_VIOLET  = "#10b981"
+_TEAL    = "#0d9488"
+_AMBER   = "#f59e0b"
+_ROSE    = "#f43f5e"
+_PALETTE = ["#10b981", "#0d9488", "#f59e0b", "#f43f5e", "#60a5fa", "#a78bfa", "#fb923c"]
 
 _LAYOUT = dict(
     paper_bgcolor=_BG,
@@ -108,15 +108,15 @@ def _eur_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def _kpi(label: str, value: str, delta: str = "") -> str:
     delta_html = (
-        f'<div style="font-size:0.72rem;color:#94a3b8;margin-top:2px;">{delta}</div>'
+        f'<div style="font-size:0.72rem;color:#9ca3af;margin-top:2px;">{delta}</div>'
         if delta else ""
     )
     return (
-        f'<div style="background:#13162a;border:1px solid #1e2235;border-radius:12px;'
+        f'<div style="background:#232830;border:1px solid #2d3440;border-radius:12px;'
         f'padding:1rem 1.2rem;text-align:center;">'
-        f'<div style="font-size:0.72rem;color:#94a3b8;text-transform:uppercase;'
+        f'<div style="font-size:0.72rem;color:#3d6b63;text-transform:uppercase;'
         f'letter-spacing:0.08em;margin-bottom:4px;">{label}</div>'
-        f'<div style="font-size:1.6rem;font-weight:700;color:#e2e8f0;">{value}</div>'
+        f'<div style="font-size:1.6rem;font-weight:700;color:#e0f0eb;">{value}</div>'
         f'{delta_html}'
         f'</div>'
     )
@@ -216,7 +216,7 @@ def _chart_avg_price_neighbourhood(df: pd.DataFrame, sector: str) -> go.Figure:
         title=f"Avg monthly rent — {sector} neighbourhoods (≥3 listings)",
         labels={"avg": "Avg rent (€)", "district": ""},
         color="avg",
-        color_continuous_scale=[[0, "#2dd4bf"], [1, "#a78bfa"]],
+        color_continuous_scale=[[0, "#0d9488"], [1, "#10b981"]],
         text=agg["avg"].map(lambda v: f"€{v:,.0f}"),
         hover_data={"count": True},
     )
@@ -318,7 +318,7 @@ def render_analytics():
             st.switch_page("app.py")
     with col_title:
         st.markdown(
-            '<h2 style="margin:0;color:#e2e8f0;font-size:1.4rem;font-weight:700;">'
+            '<h2 style="margin:0;color:#e0f0eb;font-size:1.4rem;font-weight:700;">'
             '📊 Market Analytics — Bucharest Rentals</h2>',
             unsafe_allow_html=True,
         )
@@ -339,7 +339,7 @@ def render_analytics():
     # ── Filters ──────────────────────────────────────────────────────────────
     with st.container():
         st.markdown(
-            '<p style="color:#94a3b8;font-size:0.78rem;text-transform:uppercase;'
+            '<p style="color:#3d6b63;font-size:0.78rem;text-transform:uppercase;'
             'letter-spacing:0.08em;margin-bottom:6px;">Filters</p>',
             unsafe_allow_html=True,
         )
@@ -433,7 +433,7 @@ def render_analytics():
                 st.session_state["analytics_sector"] = sectors[0]
 
             st.markdown(
-                '<p style="color:#94a3b8;font-size:0.82rem;margin-bottom:4px;">'
+                '<p style="color:#3d6b63;font-size:0.82rem;margin-bottom:4px;">'
                 'Drill down — select a sector:</p>',
                 unsafe_allow_html=True,
             )

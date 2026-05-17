@@ -72,7 +72,7 @@ def render_results():
     df_f = apply_filters(
         df,
         params.get("max_price", 0),
-        params.get("rooms", "Any"),
+        params.get("rooms", "Orice"),
         params.get("min_sqm", 0),
         params.get("max_sqm", 0),
         params.get("property_types"),

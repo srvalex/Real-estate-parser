@@ -83,7 +83,7 @@ def apply_filters(
         has_price = df["_price_num"].notna()
         df = df[~has_price | (df["_price_num"] <= max_price)]
 
-    if sel_rooms != "Any" and "_rooms_num" in df.columns:
+    if sel_rooms not in ("Any", "Orice") and "_rooms_num" in df.columns:
         has_rooms = df["_rooms_num"].notna()
         if sel_rooms == "5+":
             df = df[~has_rooms | (df["_rooms_num"] >= 5)]

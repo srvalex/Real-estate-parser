@@ -12,9 +12,8 @@ def render_home(districts, proximity, server_url):
     # Hero
     st.markdown("""
     <div class="home-hero">
-        <div class="badge">🏠 Real Estate Explorer</div>
-        <h1>Find your<br>perfect place</h1>
-        <p>Describe what you're looking for in plain language — we'll search through the scraped listings and surface the best matches.</p>
+        <h1>Agentul tău imobiliar inteligent</h1>
+        <p>Doar spune-i ce cauti la o locuință, iar el îți va găsi cele mai potrivite anunțuri</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -24,11 +23,11 @@ def render_home(districts, proximity, server_url):
         with center:
 
             # ── Vibe ──
-            st.markdown('<div class="vibe-label">✨ What\'s the vibe you\'re after?</div>', unsafe_allow_html=True)
-            st.markdown('<div class="vibe-hint">Describe in your own words — keywords, feelings, must-haves. e.g. <em>"bright, modern, quiet street near metro"</em></div>', unsafe_allow_html=True)
+            st.markdown('<div class="vibe-label"> Ce fel de locuință cauți?</div>', unsafe_allow_html=True)
+            st.markdown('<div class="vibe-hint">Descrie cu cuvintele tale — dotări, atmosferă, preferințe. ex. <em>"bucătărie mare, liniștit, aproape de metrou, renovat"</em></div>', unsafe_allow_html=True)
             vibe = st.text_area(
                 label="vibe",
-                placeholder="e.g. modern kitchen, quiet, close to a park, renovated, good light...",
+                placeholder="ex. apartament luminos, bucătărie modernă, liniștit, parc în apropiere, renovat recent...",
                 height=110,
                 label_visibility="collapsed",
             )
@@ -43,8 +42,8 @@ def render_home(districts, proximity, server_url):
 
             selected_templates = []
             if _template_files:
-                st.markdown('<div class="section-label">🖼️ Visual vibe (optional)</div>', unsafe_allow_html=True)
-                st.caption("Select reference photos — results will be ranked by visual similarity.")
+                st.markdown('<div class="section-label">🖼️ Aspect vizual (opțional)</div>', unsafe_allow_html=True)
+                st.caption("Selectează fotografii de referință — rezultatele vor fi ordonate după similaritate vizuală.")
                 cols = st.columns(2)
                 for i, fname in enumerate(_template_files):
                     fpath = os.path.join(_TEMPLATE_DIR, fname)
@@ -59,13 +58,13 @@ def render_home(districts, proximity, server_url):
             # ── Quick filters ──
             st.markdown('<div class="section-label">Filtre</div>', unsafe_allow_html=True)
 
-            max_price = st.number_input("Preț maxim (€/luna)", min_value=0, max_value=10000, value=0, step=50, help="Leave at 0 to skip")
+            max_price = st.number_input("Preț maxim (€/lună)", min_value=0, max_value=10000, value=0, step=50, help="Lasă 0 pentru fără limită")
 
             fcol1, fcol2 = st.columns(2)
             with fcol1:
                 rooms = st.selectbox(
                     "Număr camere",
-                    options=["Any", "1", "2", "3", "4", "5+"],
+                    options=["Orice", "1", "2", "3", "4", "5+"],
                     index=0,
                     help="Filtrează după numărul de camere",
                 )
@@ -86,7 +85,7 @@ def render_home(districts, proximity, server_url):
 
             # ── Zone selector ──
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="section-label">Select Locations</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-label">Zonă de căutare</div>', unsafe_allow_html=True)
 
             final_selection = []
             full_sectors = []          # district names where "select all" was checked
@@ -114,7 +113,7 @@ def render_home(districts, proximity, server_url):
                     final_selection.extend(selected_in_district)
 
             # ── Proximity ──
-            use_proximity = st.toggle("🔍 Activare Proximity Search", value=False)
+            use_proximity = st.toggle("🔍 Include cartiere vecine", value=False)
             proximity_selection = []
             if use_proximity and final_selection:
                 for area in final_selection:
@@ -124,14 +123,13 @@ def render_home(districts, proximity, server_url):
 
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-            st.caption("✅ Supabase + pgvector search ready")
 
             st.markdown('<br>', unsafe_allow_html=True)
 
             # ── CTA ──
             _, btn_col, _ = st.columns([1, 2, 1])
             with btn_col:
-                search_clicked = st.button("🔍  Search listings", use_container_width=True)
+                search_clicked = st.button("🔍  Caută locuințe", use_container_width=True)
 
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -143,7 +141,7 @@ def render_home(districts, proximity, server_url):
     # Handle search
     if search_clicked:
         if not final_selection:
-            st.error("Please select at least one location to search.")
+            st.error("Te rugăm să selectezi cel puțin o zonă de căutare.")
             st.stop()
 
         df = None
@@ -153,7 +151,7 @@ def render_home(districts, proximity, server_url):
         _ALL_PTYPES = ["Apartament", "Garsoniera", "Studio", "Casa/Vila"]
         _nlp_filled = []
 
-        if rooms == "Any" and spacy_filters.get("ROOM_COUNT"):
+        if rooms == "Orice" and spacy_filters.get("ROOM_COUNT"):
             _r = str(spacy_filters["ROOM_COUNT"])
             try:
                 if int(_r) >= 5:
@@ -186,23 +184,23 @@ def render_home(districts, proximity, server_url):
 
         # ── Query database ─────────────────────────────────────────────────────
         all_districts = final_selection + proximity_selection
-        with st.spinner("⚡ Loading listings from database…"):
+        with st.spinner("⚡ Se încarcă anunțurile..."):
             from db_utils import query_listings_by_district
             records = query_listings_by_district(all_districts)
 
         if proximity_selection:
-            st.toast(f"🔍 Proximity search added {len(proximity_selection)} nearby neighbourhood(s)", icon="🔍")
+            st.toast(f"🔍 S-au adăugat {len(proximity_selection)} cartiere învecinate", icon="🔍")
 
         if records:
             df = prepare_dataframe(pd.DataFrame(records))
             df = apply_filters(df, max_price, rooms, min_sqm, max_sqm, property_types or None)
             df = apply_price_fairness(df)
-            st.toast(f"⚡ {len(df)} listings loaded from database", icon="✅")
+            st.toast(f"⚡ {len(df)} anunțuri încărcate", icon="✅")
         else:
-            st.warning("No saved listings found for the selected zones.")
+            st.warning("Nu s-au găsit anunțuri salvate pentru zonele selectate.")
 
         if df is None or df.empty:
-            st.error("No listings found. Try different zones.")
+            st.error("Nu s-au găsit anunțuri. Încearcă alte zone.")
             st.stop()
 
         embedding_sorted = False
@@ -229,7 +227,7 @@ def render_home(districts, proximity, server_url):
 
             if missing:
                 from image_embedder import embed_local_image
-                with st.spinner(f"Embedding {len(missing)} new photo(s)…"):
+                with st.spinner(f"Se procesează {len(missing)} fotografii noi..."):
                     for p in missing:
                         e = embed_local_image(p)
                         if e is not None:
@@ -245,9 +243,9 @@ def render_home(districts, proximity, server_url):
                     avg = arr.mean(axis=0)
                     norm = np.linalg.norm(avg)
                     image_embedding = (avg / norm if norm > 0 else avg).tolist()
-                st.toast(f"🖼️ {len(embeddings)} template photo(s) ready", icon="✅")
+                st.toast(f"🖼️ {len(embeddings)} fotografii de referință procesate", icon="✅")
             else:
-                st.toast("⚠️ Could not load template photo embeddings — falling back to text search", icon="⚠️")
+                st.toast("⚠️ Nu s-au putut procesa fotografiile — se folosește doar căutarea textuală", icon="⚠️")
 
         if spacy_filters:
             df, excluded_count, exclusion_summary = apply_description_filters(df, spacy_filters)
@@ -256,14 +254,14 @@ def render_home(districts, proximity, server_url):
                           "HAS_BALCONY": "fără balcon", "FURNISHED": "nemobilat",
                           "HAS_HEATING_UNIT": "fără centrală"}
                 reasons = ", ".join(labels.get(k, k) for k in exclusion_summary)
-                st.toast(f"🚫 {excluded_count} listings removed ({reasons})", icon="🚫")
+                st.toast(f"🚫 {excluded_count} anunțuri eliminate ({reasons})", icon="🚫")
 
         url_col = "url" if "url" in df.columns else ("link" if "link" in df.columns else None)
 
         live_status = st.empty()
         live_cards  = st.empty()
 
-        live_status.info(f"⚡ Found **{len(df)}** listings — running AI ranking…")
+        live_status.info(f"⚡ S-au găsit **{len(df)}** anunțuri — se aplică scorul AI…")
         _prox_set = set(proximity_selection) or None
         with live_cards.container():
             render_property_cards(df, proximity_districts=_prox_set)
@@ -277,15 +275,15 @@ def render_home(districts, proximity, server_url):
             )
 
             if embedding_sorted:
-                live_status.success(f"🎯 AI ranked **{len(df)}** listings — navigating to results…")
+                live_status.success(f"🎯 AI a ordonat **{len(df)}** anunțuri — se navighează la rezultate…")
                 with live_cards.container():
                     render_property_cards(df, proximity_districts=_prox_set)
                 time.sleep(1.5)
             elif embed_error:
-                st.toast(f"⚠️ AI ranking skipped: {embed_error}", icon="⚠️")
-                live_status.warning("⚠️ AI ranking unavailable — showing unscored results.")
+                st.toast(f"⚠️ Scorul AI a fost omis: {embed_error}", icon="⚠️")
+                live_status.warning("⚠️ Scorul AI nu este disponibil — se afișează rezultate neordonate.")
             else:
-                live_status.warning("⚠️ No AI scores returned — showing unordered results.")
+                live_status.warning("⚠️ Nu s-au obținut scoruri AI — se afișează rezultate neordonate.")
 
         st.session_state.search_params = {
             "vibe":                vibe,
