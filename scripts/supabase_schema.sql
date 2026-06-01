@@ -113,7 +113,62 @@ BEGIN
 END;
 $$;
 
--- 6. Image similarity search function (512-dim CLIP cover photo embeddings)
+-- 6. Rooms autofill trigger — OLX and Storia listings only
+--    Fires BEFORE INSERT OR UPDATE; fills rooms from title/description when
+--    the scraper couldn't extract it. Never overwrites an existing value.
+--    Run the matching UPDATE below once to backfill historical rows.
+CREATE OR REPLACE FUNCTION autofill_rooms()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.platform_id IN ('olx', 'storia') AND NEW.rooms IS NULL THEN
+        NEW.rooms := CASE
+            WHEN NEW.property_type = 'Garsoniera'                       THEN '1'
+            WHEN lower(NEW.title)       LIKE '%2 cam%'                  THEN '2'
+            WHEN lower(NEW.title)       LIKE '%3 cam%'                  THEN '3'
+            WHEN lower(NEW.title)       LIKE '%4 cam%'                  THEN '4'
+            WHEN lower(NEW.title)       LIKE '%5 cam%'                  THEN '5'
+            WHEN lower(trim(NEW.description)) LIKE '%doua cam%'         THEN '2'
+            WHEN lower(trim(NEW.description)) LIKE '%două cam%'         THEN '2'
+            WHEN lower(trim(NEW.description)) LIKE '%2 cam%'            THEN '2'
+            WHEN lower(trim(NEW.description)) LIKE '%3 cam%'            THEN '3'
+            WHEN lower(trim(NEW.description)) LIKE '%3cam%'             THEN '3'
+            WHEN lower(trim(NEW.description)) LIKE '%trei cam%'         THEN '3'
+            WHEN lower(trim(NEW.description)) LIKE '%4 cam%'            THEN '4'
+            WHEN lower(trim(NEW.description)) LIKE '%patru cam%'        THEN '4'
+            WHEN lower(trim(NEW.description)) LIKE '%5 cam%'            THEN '5'
+            ELSE NULL
+        END;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_autofill_rooms
+BEFORE INSERT OR UPDATE ON listings
+FOR EACH ROW EXECUTE FUNCTION autofill_rooms();
+
+-- One-time backfill for existing rows with rooms IS NULL:
+-- UPDATE listings
+-- SET rooms = CASE
+--     WHEN property_type = 'Garsoniera'                       THEN '1'
+--     WHEN lower(title)       LIKE '%2 cam%'                  THEN '2'
+--     WHEN lower(title)       LIKE '%3 cam%'                  THEN '3'
+--     WHEN lower(title)       LIKE '%4 cam%'                  THEN '4'
+--     WHEN lower(title)       LIKE '%5 cam%'                  THEN '5'
+--     WHEN lower(trim(description)) LIKE '%doua cam%'         THEN '2'
+--     WHEN lower(trim(description)) LIKE '%două cam%'         THEN '2'
+--     WHEN lower(trim(description)) LIKE '%2 cam%'            THEN '2'
+--     WHEN lower(trim(description)) LIKE '%3 cam%'            THEN '3'
+--     WHEN lower(trim(description)) LIKE '%3cam%'             THEN '3'
+--     WHEN lower(trim(description)) LIKE '%trei cam%'         THEN '3'
+--     WHEN lower(trim(description)) LIKE '%4 cam%'            THEN '4'
+--     WHEN lower(trim(description)) LIKE '%patru cam%'        THEN '4'
+--     WHEN lower(trim(description)) LIKE '%5 cam%'            THEN '5'
+--     ELSE NULL END
+-- WHERE platform_id IN ('olx', 'storia') AND rooms IS NULL;
+
+
+-- 7. Image similarity search function (512-dim CLIP cover photo embeddings)
 CREATE OR REPLACE FUNCTION match_listings_by_image(
     query_embedding vector(512),
     match_count     INT DEFAULT 50

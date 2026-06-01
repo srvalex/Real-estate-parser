@@ -41,17 +41,24 @@ def render_home(districts, proximity, server_url):
             ]) if os.path.isdir(_TEMPLATE_DIR) else []
 
             selected_templates = []
+            _TEMPLATE_LABELS = {
+                "template_1": "Mobilat modern",
+                "template_2": "Clasic, luxos",
+                "template_3": "Primitor",
+                "template_4": "Bloc comunist",
+            }
             if _template_files:
-                st.markdown('<div class="section-label">🖼️ Aspect vizual (opțional)</div>', unsafe_allow_html=True)
-                st.caption("Selectează fotografii de referință — rezultatele vor fi ordonate după similaritate vizuală.")
-                cols = st.columns(2)
-                for i, fname in enumerate(_template_files):
-                    fpath = os.path.join(_TEMPLATE_DIR, fname)
-                    label = os.path.splitext(fname)[0].replace("_", " ").replace("-", " ").title()
-                    with cols[i % 2]:
-                        st.image(fpath, use_container_width=True)
-                        if st.checkbox(label, key=f"tpl_{fname}"):
-                            selected_templates.append(fpath)
+                with st.expander("🖼️ Aspect vizual (opțional)", expanded=False):
+                    st.caption("Selectează fotografii de referință — rezultatele vor fi ordonate după similaritate vizuală.")
+                    cols = st.columns(2)
+                    for i, fname in enumerate(_template_files):
+                        fpath = os.path.join(_TEMPLATE_DIR, fname)
+                        stem = os.path.splitext(fname)[0]
+                        label = _TEMPLATE_LABELS.get(stem, stem.replace("_", " ").replace("-", " ").title())
+                        with cols[i % 2]:
+                            st.image(fpath, use_container_width=True)
+                            if st.checkbox(label, key=f"tpl_{fname}"):
+                                selected_templates.append(fpath)
 
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
