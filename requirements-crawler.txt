@@ -1,0 +1,10 @@
+beautifulsoup4
+pandas
+tqdm
+curl_cffi
+supabase
+python-dotenv
+sentence-transformers
+playwright
+google-auth
+requests

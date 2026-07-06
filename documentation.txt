@@ -1,0 +1,668 @@
+================================================================================
+ROMANIAN REAL ESTATE PARSER — TECHNICAL DOCUMENTATION
+Last updated: May 2026 (Milestone 21)
+================================================================================
+
+PROJECT SUMMARY
+---------------
+A Streamlit web app that finds apartment rentals in Bucharest by scraping OLX,
+Storia, and Imobiliare.ro. Listings are stored in Supabase (Postgres + pgvector),
+ranked by semantic similarity to a user's natural-language prompt (SentenceTransformer
+via a Cloud Run embedding service), and optionally re-ranked by visual similarity
+to reference photos (CLIP + ChromaDB). A standalone crawler runs automatically
+every 2 hours via Google Cloud Run Jobs + Cloud Scheduler.
+
+================================================================================
+MILESTONE LOG
+================================================================================
+
+[MILESTONE 1] Initial scraper — OLX + Storia
+---------------------------------------------
+Technology: Python + BeautifulSoup + Playwright
+Summary: First working scrapers for OLX (plain HTTP, curl_cffi) and Storia
+  (JavaScript-heavy pages rendered via Playwright subprocess). Listings saved
+  to a local CSV, then migrated to SQLite.
+Key design: Playwright is launched as a subprocess that receives a JSON list of
+  URLs on stdin and writes results to stdout. This isolates the async event loop
+  and avoids threading conflicts with Streamlit.
+Files: scrapers/olx.py, scrapers/storia.py, scripts/get_rendered_description.py
+
+
+[MILESTONE 2] Cloud persistence — Google Firestore
+---------------------------------------------------
+Technology: Firebase Admin SDK (firebase-admin), Firestore NoSQL database
+Summary: Added dual persistence: every scraped listing is written to both SQLite
+  (local, fast queries) and Firestore (cloud, accessible from anywhere). Document
+  IDs are MD5 hashes of the listing URL, making re-inserts idempotent (upsert).
+Key design: Firestore is the "fast-path" cache — the Streamlit UI queries it on
+  load to show cached results instantly without waiting for a new scrape.
+Files: firebase_utils.py
+
+
+[MILESTONE 3] NLP keyword extraction — Ollama LLM (legacy, replaced)
+----------------------------------------------------------------------
+Technology: Ollama (local LLM server), remote Colab/ngrok endpoint
+Summary: First attempt at understanding user prompts used a local Ollama instance
+  to extract keywords from natural-language queries. Worked, but required a
+  running GPU server and introduced 30-45 second latency per query.
+Status: Replaced by local SentenceTransformer embeddings (Milestone 4).
+  Code kept in scripts/ollama_prompt.py and Streamlit Interface/embedders/ollama_parser.py
+  as reference, but not active in the pipeline.
+
+
+[MILESTONE 4] Semantic search — SentenceTransformer + ChromaDB (text embeddings)
+----------------------------------------------------------------------------------
+Technology: SentenceTransformer (paraphrase-multilingual-MiniLM-L12-v2, ~50MB),
+  ChromaDB (local persistent vector database)
+Algorithm: Cosine distance similarity search. Listing descriptions are embedded
+  at scrape time and stored in ChromaDB collection "web_archive". At query time,
+  the user's vibe prompt is embedded with the same model and the nearest
+  neighbours are retrieved. Distances are min-max normalised to a [0,1] score.
+Performance: Sub-1-second query time on CPU (down from 30-45s with Ollama).
+  Model is loaded once per Streamlit server process via @st.cache_resource.
+Files: Streamlit Interface/embedders/local_embedder.py,
+  ChromaDB/ (persistent store)
+
+
+[MILESTONE 5] NLP filter extraction — spaCy
+--------------------------------------------
+Technology: spaCy (local NLP pipeline)
+Summary: Added structured filter extraction from user prompts. spaCy identifies
+  entities like room counts, metro proximity, parking, pet-friendly, etc. and
+  maps them to pre-defined filter keys (ROOM_COUNT, HAS_METRO, HAS_PARKING, ...).
+  Filters are applied as hard exclusion rules before semantic ranking.
+Key design: Extracted filters are displayed as pills in the UI so users can see
+  what was understood from their prompt.
+Files: Streamlit Interface/pipeline/nlp_filters.py
+
+
+[MILESTONE 6] Image embedding pipeline — CLIP + ChromaDB (image embeddings)
+-----------------------------------------------------------------------------
+Technology: CLIP (openai/clip-vit-base-patch32, ViT-B/32, 512-dim vectors),
+  Flask server on Google Colab (GPU), ChromaDB collection "listing_image_embeddings"
+Algorithm: Two-path score fusion.
+  - Text path: SentenceTransformer cosine similarity → text_score
+  - Image path: CLIP text encoder (local CPU) → query ChromaDB image collection
+    → image_score
+  - Fusion: 0.6 × text_score + 0.4 × image_score for listings with image embeddings;
+    text_score only for listings without (no penalty for missing images).
+  Photo embedding: Colab GPU server receives image URLs, downloads and embeds them
+  with CLIP ViT-B/32, returns 512-dim vectors + room classification labels
+  (living room, bedroom, kitchen, bathroom, etc.).
+Infrastructure: Colab notebook (helper notebooks/clip_server.ipynb) runs a Flask
+  server exposed via ngrok. URL is pasted into a sidebar input in the Streamlit UI.
+Files: Streamlit Interface/embedders/image_embedder.py,
+  helper notebooks/clip_server.ipynb
+
+
+[MILESTONE 7] Template photo picker
+-------------------------------------
+Technology: CLIP (same as Milestone 6)
+Summary: Users can select from a set of reference / template photos (pre-loaded
+  thumbnails) to drive the visual similarity search instead of describing
+  appearance in text. Selected photos are embedded via the CLIP server and used
+  as the image query vector.
+Files: Streamlit Interface/template_photos/, components/home.py
+
+
+[MILESTONE 8] Third scraper — Imobiliare.ro
+--------------------------------------------
+Technology: Playwright (same subprocess pattern as Storia), JSON-LD structured
+  data extraction, window.dataLayer parsing
+Summary: Added Imobiliare.ro as a third data source. Its listing pages use Nuxt
+  SSR with data available in JSON-LD script tags and the dataLayer object — no
+  need to parse rendered HTML directly. Expired listings redirect to the homepage;
+  detected by comparing the final URL against the requested URL.
+Files: scrapers/imobiliare.py, scripts/get_imobiliare_listing.py
+
+
+[MILESTONE 9] 3-state availability system
+------------------------------------------
+Technology: SQLite INTEGER column, Firestore integer field
+Summary: Replaced binary available/unavailable with three states to reduce
+  unnecessary re-scraping:
+    1  = listing is live and active
+    0  = confirmed expired (skip on future incremental runs)
+   -1  = blocked / transient error (retry next run)
+  OLX expired detection: HTTP 410 Gone status + soft-delete banner (data-testid).
+  Storia expired detection: ExpiredAdContentLayout element in rendered HTML.
+  Imobiliare expired detection: redirect to homepage (URL mismatch).
+Files: extractor.py, scrapers/olx.py, scrapers/storia.py, scrapers/imobiliare.py
+
+
+[MILESTONE 10] Image backfill pipeline
+----------------------------------------
+Technology: Playwright (for Storia/Imobiliare), curl_cffi (for OLX),
+  CLIP Colab server (for embeddings)
+Summary: Two resumable backfill scripts to populate image data for historical
+  listings:
+  - backfill_image_urls.py: scrapes image URLs for all existing listings that
+    were added before image scraping was implemented. Supports --retry-unavailable
+    flag and --platform filter.
+  - backfill_image_embeddings.py: sends all scraped photo URLs to the Colab CLIP
+    server and stores resulting vectors in ChromaDB "listing_image_embeddings".
+    Skips already-embedded photo IDs on every run (resumable).
+Files: scripts/backfill_image_urls.py, scripts/backfill_image_embeddings.py
+
+
+[MILESTONE 11] Codebase reorganisation
+----------------------------------------
+Summary: Restructured from a flat layout to a modular folder hierarchy:
+  scrapers/        platform scrapers (base class + OLX, Storia, Imobiliare)
+  embedders/       text + image embedding clients
+  pipeline/        NLP filters and utility functions
+  static/          CSS injection
+  scripts/         standalone backfill + utility scripts
+  helper notebooks/ Colab notebooks (CLIP server, experiments)
+Key design: scrapers/__init__.py maintains a SCRAPERS registry dict so adding a
+  new platform requires only: (1) create scrapers/newsite.py, (2) add one line
+  to __init__.py. No other file changes needed.
+Files: scrapers/__init__.py, scrapers/base.py
+
+
+[MILESTONE 12] Automated crawler — crawler.py
+----------------------------------------------
+Technology: Python CLI (argparse), SQLite URL deduplication,
+  round-robin proxy rotation
+Algorithm:
+  Full crawl (--mode full):
+    For each platform × each sector URL, paginate until the page returns no links
+    or max_pages is reached. Skip URLs already in SQLite before scraping.
+  Incremental crawl (--mode incremental):
+    Same sector URLs. For each page, compute the ratio of already-known URLs.
+    If ratio ≥ stop_threshold (default 0.8), stop pagination for that search URL.
+    Platforms list newest-first, so new listings are on page 1 — typical
+    incremental run finishes in 1-3 pages per search URL instead of 10+.
+Scheduling: Designed to run every 2 hours via Windows Task Scheduler (local)
+  or a cloud cron job (future, see P4 in Roadmap).
+Proxy rotation: ProxyRotator class reads a proxies.txt file (one URL per line),
+  rotates round-robin. Applies to both curl_cffi (OLX) via scrapers/http.py
+  module-level state, and Playwright (Storia/Imobiliare) via PROXY_URL env var
+  which the subprocess scripts read at browser context creation.
+Files: crawler.py, scrapers/http.py (set_proxy/get_proxy),
+  scripts/get_rendered_description.py, scripts/get_imobiliare_listing.py
+
+
+[MILESTONE 13] Database migration — SQLite + Firestore → Supabase (Postgres + pgvector)
+------------------------------------------------------------------------------------------
+Technology: Supabase (hosted Postgres), pgvector extension, supabase-py v2
+Summary: Replaced SQLite (local) and Firestore (cloud NoSQL) with a single Supabase
+  Postgres database. The canonical schema normalises all three platform schemas into
+  a unified structure. A pgvector `embedding vector(384)` column replaces the
+  ChromaDB "web_archive" text collection for semantic search.
+Key design decisions:
+  - Canonical schema: price_numeric FLOAT, area_sqm FLOAT, rooms '1'–'5+',
+    image_urls JSONB, extras JSONB, embedding vector(384)
+  - All three platforms had different column names for the same fields — normalised
+    in normalize_listings.py before migration
+  - 4,340 rows had NULL platform_id — detected from URL domain at migration time
+  - price/area encoding corruption in SQLite (€ → ?, ² → ?) handled by not relying
+    on the currency symbol, defaulting to EUR unless 'lei'/'ron' detected
+  - db_utils._clean_record normalises raw scraped data on every upsert so new
+    crawler output is also canonical (strips unknown columns to avoid PostgREST 400)
+  - match_listings() Postgres function enables pgvector cosine similarity search
+    from the Streamlit app without Supabase SDK awareness of vector operations
+Embedding backfill: scripts/backfill_embeddings.py populates NULL embedding rows
+  in batches of 64. Safe to Ctrl-C and resume.
+New listings embedded at scrape time in extractor.py (model loaded lazily, no
+  Streamlit dependency in the crawler process).
+Files: db_utils.py, scripts/supabase_schema.sql, scripts/normalize_listings.py,
+  scripts/backfill_embeddings.py, extractor.py, Streamlit Interface/pipeline/utils.py
+
+
+[MILESTONE 14] OLX district extraction from listing title
+----------------------------------------------------------
+Technology: regex + districts.json neighbourhood map
+Summary: OLX does not expose a structured district/neighbourhood field in listing
+  data. Previously all OLX listings had NULL district, making them invisible when
+  filtering by area.
+Algorithm: At scrape time, the listing title is normalised (lowercase, diacritics
+  stripped) and scanned against all known neighbourhood names from districts.json.
+  Names are checked longest-first to avoid partial-match false positives (e.g.
+  "Drumul Taberei" matches before "Taberei").
+Result: OLX listings now populate the `district` field from the title for the
+  majority of listings that include the neighbourhood name.
+Files: scrapers/olx.py (_get_neighbourhood_map, _extract_district_from_title)
+
+
+================================================================================
+DATABASE SCHEMA NOTES
+================================================================================
+
+Supabase (Postgres + pgvector) — PRIMARY DATABASE (as of April 2026)
+  Table: listings
+  Primary key: url (TEXT)
+  Key columns:
+    platform_id TEXT — 'olx' | 'storia' | 'imobiliare'
+    price_numeric FLOAT — parsed from raw price string
+    price_currency TEXT — 'EUR' | 'RON'
+    rooms TEXT — '1' | '2' | '3' | '4' | '5+' (normalised)
+    area_sqm FLOAT — parsed from raw area string
+    image_urls JSONB — [{thumbnail, small, medium, large}, ...]
+    extras JSONB — platform-specific fields (Storia building details etc.)
+    property_type TEXT — "Apartament" | "Garsonieră" | "Casă / Vilă"
+                         inferred from title at upsert time by _clean_record()
+    embedding vector(384) — SentenceTransformer embedding of description/title
+    is_available INTEGER — 1=live, 0=expired, -1=blocked/transient
+    first_seen_at / last_seen_at TIMESTAMPTZ — for listing age tracking
+  Functions:
+    match_listings(query_embedding, match_count, min_available) — pgvector
+    cosine similarity search, returns ranked rows with similarity score
+  Upsert key: url (on_conflict="url") — idempotent inserts
+  Client: db_utils.py (save_to_db, query_listings_by_district, search_by_text_vibe)
+
+SQLite — Streamlit Interface/real_estate.db (local cache, crawler deduplication)
+  Still used as URL deduplication cache by crawler.py and extractor.py.
+  embedding column is NOT stored here (vector type unsupported).
+  Schema evolves automatically: _evolve_schema() adds missing columns via
+  ALTER TABLE before each bulk insert.
+
+ChromaDB — local persistent store at ChromaDB/
+  Collection "web_archive": SUPERSEDED by Supabase pgvector — kept on disk
+    but no longer written to or queried by the active pipeline.
+  Collection "listing_image_embeddings": ACTIVE
+    Vectors: 512-dim (CLIP ViT-B/32)
+    Metadata: listing_url, image_url, room_labels, position
+    IDs: MD5 of photo URL
+
+
+================================================================================
+EXTERNAL DEPENDENCIES
+================================================================================
+
+  curl_cffi          — TLS fingerprint spoofing for OLX HTTP requests
+  playwright         — headless Chromium for Storia + Imobiliare JS rendering
+  sentence-transformers — local text embedding model
+  supabase           — Supabase Python client (Postgres + pgvector)
+  python-dotenv      — .env credential loading
+  chromadb           — local vector database (image embeddings only)
+  firebase-admin     — Firestore client (legacy, superseded by supabase)
+  transformers       — CLIP text model (local CPU inference)
+  spacy              — NLP keyword extraction
+  streamlit          — web UI framework
+  beautifulsoup4     — HTML parsing
+  pandas             — dataframe manipulation
+  tqdm               — progress bars in CLI scripts
+
+
+================================================================================
+PROXY SETUP GUIDE
+================================================================================
+
+To run the crawler without IP bans, supply a proxy file:
+
+  1. Create proxies.txt in the project root (lines starting with # are ignored):
+       http://username:password@gate.smartproxy.com:10000
+       http://username:password@gate.smartproxy.com:10001
+       ...
+
+  2. Run:
+       python crawler.py --mode incremental --proxy-file proxies.txt
+
+  Recommended providers (residential IPs):
+    - Smartproxy  — smartproxy.com  (~$75/mo entry, good Romanian coverage)
+    - Bright Data  — brightdata.com (~$500/mo, most reliable, best for scale)
+    - IPRoyal     — iproyal.com    (~$7/GB, pay-as-you-go, good for testing)
+
+  Proxy rotation strategy:
+    - OLX (curl_cffi HTTP): rotates per page-fetch and per scrape-batch call
+    - Storia / Imobiliare (Playwright): rotates per batch (10 listings per context)
+    - Rotation is round-robin across the proxy list
+
+
+[MILESTONE 15] Cloud deployment — Google Cloud Run Jobs + Cloud Scheduler
+--------------------------------------------------------------------------
+Technology: Google Cloud Run Jobs, Google Cloud Scheduler, Artifact Registry,
+  Secret Manager, Docker (python:3.12-slim + Playwright + SentenceTransformer)
+Summary: Containerised the crawler and deployed it as a fully managed, serverless
+  Cloud Run Job scheduled via Cloud Scheduler. The crawler now runs automatically
+  every 2 hours (incremental) and every Sunday at 03:00 (full crawl) without any
+  local machine involvement. Incremental runs confirmed working in production.
+Infrastructure decisions:
+  - Cloud Run Jobs (not Services): runs to completion then exits — correct model
+    for a batch crawler. Billed only for CPU/RAM during execution (~$0/month at
+    current scraping volume).
+  - Artifact Registry: Docker images stored at
+    europe-west1-docker.pkg.dev/real-estate-crawler-494819/repo-crawler/crawler
+  - Secret Manager: SUPABASE_KEY and PROXY_LIST injected as secrets (not env vars)
+    so credentials are never baked into the image or visible in job config.
+  - Memory: 4Gi (upgraded from 2Gi — Chromium + SentenceTransformer + scraping headroom).
+  - Region: europe-west1 (Belgium) — closest GCP region to Romania.
+  - Non-root appuser for security; HF_HOME and PLAYWRIGHT_BROWSERS_PATH redirected
+    to /app/ so the non-root user can access the pre-baked model cache.
+Docker image design:
+  - Base: python:3.12-slim
+  - SentenceTransformer model pre-downloaded at build time (Docker layer cache)
+    so containers start without a HuggingFace Hub download on each invocation.
+  - Playwright + Chromium installed with all system dependencies.
+  - Only crawler-relevant files copied (Streamlit UI excluded via .dockerignore).
+Stateless container adaptations (crawler.py):
+  - SQLite is empty on each invocation (ephemeral container filesystem).
+    Deduplication pre-loads all known URLs from Supabase into memory at startup
+    via get_all_db_urls() — checked before any scraping begins.
+  - ProxyRotator.from_env(): reads PROXY_LIST env var (newline or comma-separated
+    Webshare format) so proxy credentials are injected via Secret Manager, not
+    a local file.
+Reliability: db_utils._upsert_batch now retries transient network/DNS errors with
+  exponential backoff (1s, 2s) before falling back to row-by-row. Prevents a
+  brief DNS hiccup from silently dropping an entire batch of scraped listings.
+Scheduling:
+  - crawl-incremental: "0 */2 * * *" — every 2 hours (confirmed working)
+  - crawl-full:        "0 3 * * 0"  — every Sunday at 03:00
+Files: Dockerfile, .dockerignore, requirements-crawler.txt, crawler.py
+  (ProxyRotator.from_env, _load_supabase_known), db_utils.py (_is_transient,
+  _upsert_batch retry logic)
+
+
+[MILESTONE 16] Price fairness indicator
+-----------------------------------------
+Technology: Supabase SQL aggregation, Streamlit cache, HTML badge rendering
+Summary: Each listing card now shows a price fairness badge comparing the listing
+  price against the average for its (district, rooms) bucket — e.g.
+  "📉 -12% vs avg" in green or "📈 +15% vs avg" in red.
+Algorithm:
+  - get_price_stats() in db_utils.py: paginates all is_available=1 EUR listings,
+    groups by (district, rooms), returns avg + count per bucket.
+  - apply_price_fairness() in pipeline/utils.py: adds price_fairness column to df.
+    Suppresses badge if fewer than 5 comparables exist in the bucket, or if the
+    price is within ±5% of average (avoids noisy near-average badges).
+  - Cached for 1 hour via @st.cache_data so the aggregation query only runs once
+    per session.
+  - results.py: renders the badge as a coloured chip in the card meta section.
+Files: db_utils.py (get_price_stats), pipeline/utils.py (apply_price_fairness,
+  _cached_price_stats), components/results.py (badge HTML)
+
+
+[MILESTONE 17] Cloud embedding service — Google Cloud Run Service
+------------------------------------------------------------------
+Technology: FastAPI, SentenceTransformer, CLIP (openai/clip-vit-base-patch32),
+  Google Cloud Run Service, Google IAM authentication
+Summary: Replaced the Streamlit app's local SentenceTransformer model with a
+  dedicated Cloud Run Service that serves both text and image embeddings. The
+  Streamlit app calls the cloud service for text embedding and falls back to the
+  local model if the service is unavailable.
+Endpoints:
+  GET  /health        — 503 while models are loading, 200 when ready
+  POST /embed/text    — 384-dim SentenceTransformer embedding for a text string
+  POST /embed         — 512-dim CLIP image embeddings + room labels (drop-in for
+                        the Colab clip_server.ipynb /embed endpoint)
+Design decisions:
+  - Models baked into the Docker image at build time (HF_HOME=/app/hf-cache),
+    so no HuggingFace Hub download on container startup.
+  - HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 set at RUNTIME (after the model
+    download RUN step in Dockerfile) — prevents hub verification hang. MUST come
+    after the download step; if placed before, the build-time download fails.
+  - Thread-count env vars (OMP_NUM_THREADS=1, MKL_NUM_THREADS=1,
+    OPENBLAS_NUM_THREADS=1, NUMEXPR_NUM_THREADS=1, TOKENIZERS_PARALLELISM=false)
+    set in both Dockerfile ENV and main.py os.environ.setdefault() as safety net.
+  - Authentication: IAM (--no-allow-unauthenticated). Streamlit uses
+    service_account.IDTokenCredentials from GOOGLE_APPLICATION_CREDENTIALS.
+    Crawler job uses google.oauth2.id_token.fetch_id_token() against the Cloud
+    Run metadata server (no key file needed in GCP environment).
+  - Warmup ping: warmup_service() fires GET /health on Streamlit page load
+    so the Cloud Run cold-start happens while the user fills the form.
+  - Fallback: if EMBED_SERVICE_URL is not set or the service returns an error,
+    embed_query() falls back to the local SentenceTransformer model.
+
+gVisor cold-start issue and fix:
+  Cloud Run gen1 runs inside gVisor (sandboxed kernel). gVisor restricts
+  pthread_create in a way that causes torch, sentence-transformers, and
+  transformers to hang indefinitely when they first perform thread-pool
+  initialisation inside a background worker thread. The hang does NOT occur
+  in the main Python thread.
+
+  Root cause: every `import torch`, `from sentence_transformers import
+  SentenceTransformer`, and `from transformers import CLIPModel` triggers
+  thread-pool setup on first call. In a background thread under gVisor,
+  this blocks forever (or for 15+ minutes before timing out).
+
+  Fix applied (embedding-service/main.py):
+  1. Set OMP_NUM_THREADS=1 etc. BEFORE any import (both Dockerfile ENV and
+     os.environ.setdefault at top of main.py).
+  2. Pre-import all slow libraries at module level (main thread, before
+     uvicorn starts):
+       import torch as _torch_preload
+       import torch.nn.functional as _F_preload
+       from sentence_transformers import SentenceTransformer as _STp
+       from transformers import CLIPModel, CLIPProcessor
+     These run in the main thread — fast (25 s total). When the background
+     thread later does `import torch` etc., the modules are already in
+     sys.modules — no thread-pool init, no hang.
+  3. Background thread only loads model WEIGHTS (fast, cached on disk) and
+     sets _ready=True. /health returns 503 until then, 200 when done.
+
+  Additional crashes fixed during debugging:
+  - CLIPModel.get_text_features() and get_image_features() return
+    BaseModelOutputWithPooling (not a tensor) in newer transformers versions.
+    Calling .norm() on it crashes. Fix: use text_model(input_ids, attn_mask)
+    → text_projection(pooler_output) → F.normalize(f, dim=-1) directly.
+    Same pattern applied to vision_model + visual_projection for images.
+  - Startup probe path mangled by PowerShell: passing
+    --startup-probe=httpGet.path=/health on Windows expands /health to
+    D:/Git/health. Workaround: use TCP probe (default) and have callers
+    poll /health themselves. If HTTP probe needed, use gcloud run services
+    replace with a YAML file instead of --startup-probe flag.
+
+  Current limitation: even with pre-imports, gVisor stalls ~1-2 min between
+  each model's weight-loading and the next init call — total cold start ~7 min.
+  To eliminate: switch to gen2 execution environment (standard Linux, no gVisor):
+    gcloud run services update embedder --region europe-west1 \
+      --execution-environment gen2
+  Or keep one warm instance (--min-instances 1, ~$8/month for 4Gi).
+
+  Crawler-side fix: _wait_for_embed_service() polls /health every 5s with a
+  600s (10-minute) timeout before starting image backfill batches. Also fixed
+  a bug where break in the inner batch for-loop didn't exit the outer while
+  True, causing infinite retries on the same unembedded rows.
+Service URL: https://embedder-133295194630.europe-west1.run.app
+Image: europe-west1-docker.pkg.dev/real-estate-crawler-494819/repo-crawler/embedder
+Files: embedding-service/main.py, embedding-service/Dockerfile,
+  Streamlit Interface/embedders/local_embedder.py (embed_query, warmup_service,
+  _embed_via_service, _get_id_token),
+  Streamlit Interface/components/home.py (warmup on page load, env-based URL)
+
+
+[MILESTONE 18] Post-crawl embedding backfill + image embeddings in Supabase
+-----------------------------------------------------------------------------
+Technology: SentenceTransformer (text), CLIP via embedding service (images),
+  Supabase pgvector (storage), Google Cloud Run identity tokens (auth)
+Summary: After every crawl, the crawler automatically backfills any listings
+  that are missing text or cover-photo embeddings. Image embeddings are now
+  stored in Supabase (listings.image_embedding vector(512)) rather than local
+  ChromaDB, making them accessible from all environments including Cloud Run.
+  The Streamlit image search now queries Supabase instead of local ChromaDB.
+
+Text backfill (run_embedding_backfill in crawler.py):
+  - Queries Supabase for rows where embedding IS NULL and title/description present
+  - Embeds in batches of 64 using the SentenceTransformer model already loaded
+    in the crawler Docker image (no extra model download)
+  - Updates each row via db_utils.get_client().table("listings").update()
+  - Catches listings that failed to embed at scrape time (network error, etc.)
+
+Image backfill (run_embedding_backfill in crawler.py):
+  - Queries db_utils.get_listings_missing_image_embedding() for listings with
+    image_urls but no image_embedding (batches of 50)
+  - Extracts cover photo URL (first image, medium → small → thumbnail fallback)
+  - Sends batches of 10 cover photo URLs to EMBED_SERVICE_URL/embed
+  - Before first batch: _wait_for_embed_service() polls /health every 5s for
+    up to 600s — waits for the service to finish its ~7min cold start before
+    sending any embed requests (avoids infinite retry loop on 503)
+  - Stores returned 512-dim CLIP vectors via db_utils.update_image_embedding()
+  - Auth: _get_embed_auth_header() uses Cloud Run metadata server in GCP,
+    falls back to GOOGLE_APPLICATION_CREDENTIALS key file locally
+
+Supabase schema additions (scripts/supabase_schema.sql):
+  - ALTER TABLE listings ADD COLUMN IF NOT EXISTS image_embedding vector(512)
+  - CREATE OR REPLACE FUNCTION match_listings_by_image(query_embedding vector(512),
+      match_count INT) — cosine similarity search on image_embedding column,
+      returns (url, similarity) ordered by distance
+
+db_utils.py additions:
+  - get_listings_missing_text_embedding(limit) — rows with NULL embedding
+  - get_listings_missing_image_embedding(limit) — rows with image_urls, NULL image_embedding
+  - update_image_embedding(url, embedding) — single-row image_embedding update
+  - search_by_image_embedding(query_embedding, limit) — calls match_listings_by_image RPC
+  - image_embedding added to _CANONICAL_COLUMNS
+
+Streamlit image search migration (ChromaDB → Supabase):
+  - apply_ai_scores() in pipeline/utils.py now calls db_utils.search_by_image_embedding()
+    instead of image_embedder.search_by_text_vibe() (which queried local ChromaDB)
+  - For text vibe queries: local CLIP text tower encodes the vibe string into a
+    512-dim embedding (image_embedder.clip_encode_text()), then queries Supabase
+  - For template photo queries: pre-computed 512-dim embedding passed directly
+    to db_utils.search_by_image_embedding()
+  - clip_encode_text() added to image_embedder.py — exposes encoding step without
+    the ChromaDB search, so utils.py can route the result to Supabase instead
+
+Infrastructure:
+  - EMBED_SERVICE_URL env var added to crawler-job Cloud Run Job config
+  - Crawler's default compute SA (133295194630-compute@...) granted
+    roles/run.invoker on the embedder service
+  - google-auth and requests added to requirements-crawler.txt
+
+Files: crawler.py (run_embedding_backfill, _get_embed_auth_header),
+  db_utils.py (get_listings_missing_text_embedding, get_listings_missing_image_embedding,
+  update_image_embedding, search_by_image_embedding),
+  scripts/supabase_schema.sql (image_embedding column, match_listings_by_image),
+  Streamlit Interface/embedders/image_embedder.py (clip_encode_text),
+  Streamlit Interface/pipeline/utils.py (apply_ai_scores image path),
+  requirements-crawler.txt, embedding-service/Dockerfile
+
+
+[MILESTONE 19] Bug fix — analytics property_type gap
+------------------------------------------------------
+Summary: The Market Analytics dashboard was not showing any new listings despite
+  new data arriving from the crawler every 2 hours. Hitting the Refresh button
+  (which calls st.cache_data.clear()) had no effect because the data simply wasn't
+  in the query results to begin with.
+
+Root cause (two gaps in db_utils.py):
+  1. `property_type` was missing from _CANONICAL_COLUMNS. _clean_record() strips
+     every key not in that set before upserting, so any `property_type` value
+     passed in was silently dropped on every save.
+  2. None of the scrapers (OLX, Storia, Imobiliare) set `property_type` in their
+     output dicts. Combined with gap 1, all new listings landed in Supabase with
+     property_type = NULL.
+  fetch_analytics_data() filters to `is_available=1 AND property_type IS NOT NULL`,
+  so NULL rows were invisible to analytics regardless of how fresh they were.
+  Existing rows visible in analytics were written before this gap was introduced.
+
+Fix (db_utils.py):
+  1. Added `"property_type"` to _CANONICAL_COLUMNS so the column survives upserts.
+  2. Added inference logic at the end of _clean_record(): if property_type is not
+     already set, the listing title is normalised (lowercase + diacritics stripped)
+     and matched against keyword patterns:
+       - "garsonier" / "studio"    → "Garsonieră"
+       - "casa" / "vila" / "duplex" → "Casă / Vilă"
+       - any other titled listing   → "Apartament" (safe default — all three
+         scrapers target apartment/garsoniere search categories only)
+  All new listings from the next crawler run onwards will have property_type set
+  and appear in analytics. Existing NULL rows will be backfilled on their next
+  upsert (e.g. availability check).
+Files: db_utils.py (_CANONICAL_COLUMNS, _clean_record step 6)
+
+
+[MILESTONE 20] Recommendation system — Reciprocal Rank Fusion (RRF)
+--------------------------------------------------------------------
+Summary: Replaced the raw weighted-average score fusion in apply_ai_scores()
+  with Reciprocal Rank Fusion (RRF). The previous fusion (0.2 × text_score +
+  0.8 × image_score) mixed cosine similarities from two incomparable vector
+  spaces, producing a statistically uncalibrated composite score.
+
+Problem with the old approach:
+  - SentenceTransformer (384-dim) and CLIP (512-dim) are trained with different
+    objectives and produce cosine similarities on different scales:
+      ST text scores:   typically 0.4 – 0.8  (a "great" match ≈ 0.75)
+      CLIP img scores:  typically 0.15 – 0.35 (a "great" match ≈ 0.33)
+  - A raw weighted average of numbers from different distributions is not
+    meaningful — the 80% weight on image was doubly dominant because CLIP scores
+    also happen to land lower numerically, further drowning out the text signal.
+  - Example: 0.2×0.75 + 0.8×0.33 = 0.15 + 0.264 = 0.414. The ST signal
+    (highest possible: 0.15) could not materially affect final rank regardless
+    of how strong the description match was.
+
+RRF formula:
+  rrf(url) = W_TEXT  / (K + text_rank(url))
+           + W_IMAGE / (K + image_rank(url))
+
+  where rank(url) is the listing's position (1 = best) within each model's
+  result set, sorted by raw cosine similarity descending. URLs absent from a
+  ranked list contribute 0 for that component (treated as infinite rank).
+
+Constants (tunable in utils.py):
+  K       = 60   — standard dampening constant; prevents rank-1 from having a
+                   disproportionate advantage over rank-2 while still strongly
+                   preferring anything near the top of either list.
+  W_TEXT  = 0.3  — weight for SentenceTransformer description-match ranking.
+                   Slightly higher than the old 0.2 because RRF no longer needs
+                   to compensate for scale differences between the two models.
+  W_IMAGE = 0.7  — weight for CLIP visual-similarity ranking.
+
+Why RRF over percentile normalisation:
+  - Percentile normalisation maps raw scores linearly to [0,1] within the result
+    set. This loses the shape of the score distribution — a cluster of near-equal
+    scores at the top gets artificially spread out.
+  - Percentile is also sensitive to result set size mismatch (text returns 200,
+    image returns 3000 — a listing ranked 150th looks equally mediocre in both
+    but covers 75% vs 5% of each set respectively).
+  - RRF is purely ordinal — only position integers matter, not raw values.
+    The sublinear 1/(K+rank) curve naturally reflects that being in the top 5 is
+    a strong signal and the difference between rank 200 and 201 is noise.
+    It requires zero calibration and stays valid as score distributions shift.
+
+Behaviour by mode (unchanged from caller's perspective):
+  - text only:   pure ST rank score (W_TEXT / (K + text_rank))
+  - image only:  pure CLIP rank score (W_IMAGE / (K + image_rank))
+  - both:        RRF sum of both components; listings absent from one list are
+                 not penalised — they simply don't receive that component's score.
+
+Files: Streamlit Interface/pipeline/utils.py (apply_ai_scores — _rank_map
+  helper, fusion block replacing raw weighted average; docstring updated)
+
+
+[MILESTONE 21] Proximity search
+---------------------------------
+Summary: Allows users to search not only the neighbourhoods they explicitly select
+  but also their immediate neighbours — without having to name them. Useful when a
+  user wants listings "around Floreasca" or "near the centre" without knowing all
+  adjacent area names.
+
+Algorithm:
+  1. proximity.json maps each neighbourhood to a hand-curated list of adjacent
+     neighbourhoods (e.g. Aviatiei → [Baneasa, Pipera, Aviatorilor, Floreasca]).
+  2. The home page exposes a toggle "🔍 Activare Proximity Search". When enabled,
+     the app iterates over every explicitly selected neighbourhood and collects its
+     adjacency list from proximity.json, de-duplicating against the primary selection.
+  3. The combined list (primary + proximity) is passed to query_listings_by_district()
+     in a single Supabase query — the DB sees no distinction between the two sets.
+  4. proximity_selection is stored in search_params and passed through to the card
+     renderer. Cards whose district falls in proximity_selection (but not in the
+     primary selection) display a purple "🔍 nearby" badge so users can distinguish
+     proximity results from exact-match results.
+  5. A toast confirms how many extra neighbourhoods were added when search runs.
+
+Data file: streamlit_interface/proximity.json — 100+ entries covering all major
+  Bucharest neighbourhoods. Adjacency is symmetric where geographically correct
+  but maintained manually (not computed from coordinates).
+Files: streamlit_interface/proximity.json,
+  streamlit_interface/components/home.py (proximity toggle, combined query, badge pass-through),
+  streamlit_interface/components/results.py (render_property_cards proximity_districts param,
+  "nearby" badge HTML)
+
+
+================================================================================
+ROADMAP SUMMARY (as of May 2026)
+================================================================================
+
+P1  Automated crawler            DONE (crawler.py)
+P2  SQLite → Supabase/pgvector   DONE — canonical schema, pgvector text search, OLX district from title
+P3  Proxy rotation               DONE (ProxyRotator in crawler.py, http.py, subprocs)
+P4  Cloud crawler worker         DONE — Cloud Run Jobs + Cloud Scheduler, confirmed working in production
+P4  Cloud embedding service      DONE — working, gVisor pre-import fix applied, ~7min cold start (gen2 upgrade path documented)
+P4  Streamlit app hosting        Not started — Streamlit Community Cloud or Cloud Run
+P4  Modal.com CLIP server        Not started (lower priority — /embed already in cloud service)
+M3  Price fairness indicator      DONE — (district, rooms) avg comparison badge on cards
+M3  Recommendation system (RRF)  DONE — Reciprocal Rank Fusion replaces raw score average; scale-independent, no calibration needed
+M3  Proximity search              DONE — adjacency map, combined DB query, "nearby" card badge
+M3  Other user features          Photo upload, listing age, price drop alerts
+M4  Monetisation                 Interaction logging, swipe mode, quality scoring

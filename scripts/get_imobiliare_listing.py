@@ -17,10 +17,52 @@ We compare the final page URL against the requested URL — mismatch = expired.
 
 import asyncio
 import json
+import os
 import sys
 import io
+from urllib.parse import urlparse
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+def classify_imobiliare_page(content: str, requested_url: str, final_url: str) -> dict:
+    """Classify an Imobiliare listing page as live, expired, or blocked."""
+    lowered = content.lower()
+    unavailable_markers = (
+        "nu se primesc cereri pentru această proprietate",
+        "nu se primesc cereri pentru aceasta proprietate",
+        "anunțul nu mai este disponibil",
+        "anuntul nu mai este disponibil",
+        "nu mai este disponibil",
+        "nu mai este activ",
+        "anunț arhivat",
+        "anunt arhivat",
+        "deja închiriat",
+        "deja inchiriat",
+        # NOTE: "rezervat" and "vândut"/"vindut" were removed — every page's
+        # footer reads "Toate drepturile rezervate" (all rights reserved),
+        # which matched "rezervat" and false-flagged 100% of live listings
+        # as expired.
+    )
+
+    if any(marker in lowered for marker in unavailable_markers):
+        return {"url": requested_url, "status": "expired"}
+
+    # Redirect-based detection removed: a blocked proxy redirects to the same
+    # homepage as a genuine expired listing, making them indistinguishable.
+    # Expiry is instead inferred from absent JSON-LD in fetch_url below.
+    return {"url": requested_url, "status": "blocked", "message": "no explicit expiry marker found"}
+
+
+def _playwright_proxy() -> dict | None:
+    """Parse PROXY_URL env var into the dict Playwright's new_context() expects."""
+    raw = os.environ.get("PROXY_URL", "").strip()
+    if not raw:
+        return None
+    p = urlparse(raw)
+    proxy = {"server": f"{p.scheme}://{p.hostname}:{p.port}"}
+    if p.username:
+        proxy["username"] = p.username
+    if p.password:
+        proxy["password"] = p.password
+    return proxy
 
 
 async def fetch_url(context, url: str) -> dict:
@@ -35,6 +77,11 @@ async def fetch_url(context, url: str) -> dict:
 
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+        content = await page.content()
+        result = classify_imobiliare_page(content, url, page.url)
+        if result["status"] == "expired":
+            return result
 
         # ── Extract JSON-LD ───────────────────────────────────────────────────
         ld_blocks = await page.evaluate(
@@ -93,7 +140,8 @@ async def scrape_batch(urls: list[str]) -> list[dict]:
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/122.0.0.0 Safari/537.36"
-            )
+            ),
+            proxy=_playwright_proxy(),
         )
         tasks = [fetch_url(context, url) for url in urls]
         results = await asyncio.gather(*tasks)
@@ -112,6 +160,8 @@ def safe_serialize(obj):
 
 
 if __name__ == "__main__":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
     input_data = sys.stdin.read().strip()
     if not input_data:
         sys.exit(0)

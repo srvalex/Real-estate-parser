@@ -1,16 +1,13 @@
-# ── Web / scraping ────────────────────────────────────────────────────────────
-playwright
-beautifulsoup4
-requests
-curl_cffi
-
-# ── Data ──────────────────────────────────────────────────────────────────────
+# ── Core ──────────────────────────────────────────────────────────────────────
+streamlit
 pandas
-tqdm
+requests
+python-dotenv
+beautifulsoup4
+curl_cffi
 
 # ── Database ──────────────────────────────────────────────────────────────────
 supabase
-python-dotenv
 
 # ── Visualisation ─────────────────────────────────────────────────────────────
 plotly
@@ -19,7 +16,7 @@ plotly
 google-auth
 
 # ── NLP ───────────────────────────────────────────────────────────────────────
-# spaCy + Romanian model (versions must match — bump both together)
+numpy<2
 spacy>=3.7,<3.8
 https://github.com/explosion/spacy-models/releases/download/ro_core_news_sm-3.7.0/ro_core_news_sm-3.7.0-py3-none-any.whl
 

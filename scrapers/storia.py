@@ -5,12 +5,13 @@ Storia Romania scraper implementing PlatformScraper.
 Uses a subprocess to render JavaScript-heavy listing pages.
 """
 
-import json
 import os
-import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
+from curl_cffi import requests as cffi_requests
 from .base import PlatformScraper
 from .http import get_content
+from scripts.get_rendered_description import classify_storia_page
 
 
 class StoriaScraper(PlatformScraper):
@@ -138,33 +139,39 @@ class StoriaScraper(PlatformScraper):
                 if p:
                     p["is_available"] = 1
                     parsed.append(p)
-            # blocked → drop silently
+            else:
+                parsed.append({
+                    "url":          r.get("url", ""),
+                    "platform_id":  self.platform_id,
+                    "is_available": None,
+                    "status":       status,
+                })
         return parsed
 
     def _fetch_batch_raw(self, urls: list[str]) -> list[dict]:
         if not urls:
             return []
-        script = os.path.join(os.path.dirname(__file__), "..", "scripts", "get_rendered_description.py")
-        try:
-            proc = subprocess.Popen(
-                ["python", script],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-            )
-            stdout, stderr = proc.communicate(input=json.dumps(urls))
-            if stdout.strip():
-                try:
-                    return json.loads(stdout.strip())
-                except json.JSONDecodeError:
-                    print(f"  [storia json error] {stdout[:100]}")
-            elif stderr:
-                print(f"  [storia batch error] {stderr[:200]}")
-        except Exception as e:
-            print(f"  [storia subprocess error] {e}")
-        return []
+        proxy_url = os.environ.get("PROXY_URL", "").strip() or None
+        proxies = {"https": proxy_url, "http": proxy_url} if proxy_url else None
+
+        def _fetch_one(url: str) -> dict:
+            try:
+                r = cffi_requests.get(
+                    url,
+                    proxies=proxies,
+                    impersonate="chrome120",
+                    timeout=20,
+                    allow_redirects=True,
+                )
+                final_url = str(r.url)
+                if "/ro/oferta/" not in final_url:
+                    return {"url": url, "status": "expired", "data": {}}
+                return classify_storia_page(r.text, url)
+            except Exception as e:
+                return {"url": url, "status": "blocked", "message": str(e)}
+
+        with ThreadPoolExecutor(max_workers=min(len(urls), 10)) as executor:
+            return list(executor.map(_fetch_one, urls))
 
     def _parse_raw(self, raw: dict) -> dict | None:
         data = raw.get("data") if isinstance(raw, dict) and "data" in raw else raw
@@ -212,6 +219,27 @@ class StoriaScraper(PlatformScraper):
             # Canonical price field
             result["price_eur"] = result.get("price", "")
             result["rent"] = result.get("price", "")   # backward compat
+
+            # Property type from top-level estate field in __NEXT_DATA__ ad object.
+            # OLX-group platforms (Storia is OLX Group) expose estate as e.g.
+            # "FLAT", "STUDIO", "HOUSE" at the ad level, not in characteristics.
+            _ESTATE_MAP = {
+                "flat":        "Apartament",
+                "apartment":   "Apartament",
+                "apartament":  "Apartament",
+                "studio":      "Studio",
+                "garsoniera":  "Garsoniera",
+                "garsonieră":  "Garsoniera",
+                "house":       "Casa/Vila",
+                "houses":      "Casa/Vila",
+                "casa":        "Casa/Vila",
+                "vila":        "Casa/Vila",
+            }
+            estate_raw = data.get("estate", "")
+            if estate_raw:
+                result["property_type"] = _ESTATE_MAP.get(
+                    str(estate_raw).lower(), str(estate_raw)
+                )
 
             return result
         except Exception as e:

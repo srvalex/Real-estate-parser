@@ -13,6 +13,7 @@ import json
 import re
 import os
 import subprocess
+import sys
 from bs4 import BeautifulSoup
 from .base import PlatformScraper
 from .http import get_content
@@ -132,7 +133,10 @@ class ImobiliareRoScraper(PlatformScraper):
             else:
                 paged = f"{search_url}?page={n}"
 
-            html = get_content(paged)
+            # Imobiliare's DataDome protection blocks the entire Webshare
+            # datacenter proxy pool (confirmed 0/100 pass), but is fine with
+            # direct requests — so skip the session-wide proxy here.
+            html = get_content(paged, use_proxy=False)
             if not html:
                 continue
 
@@ -179,7 +183,13 @@ class ImobiliareRoScraper(PlatformScraper):
                 if p:
                     p["is_available"] = 1
                     parsed.append(p)
-            # blocked → drop silently
+            else:
+                parsed.append({
+                    "url":          r.get("url", ""),
+                    "platform_id":  self.platform_id,
+                    "is_available": None,
+                    "status":       status,
+                })
         return parsed
 
     def scrape_listing_with_status(self, url: str) -> dict:
@@ -202,16 +212,28 @@ class ImobiliareRoScraper(PlatformScraper):
         script = os.path.join(
             os.path.dirname(__file__), "..", "scripts", "get_imobiliare_listing.py"
         )
+        # Drop PROXY_URL for this subprocess — Imobiliare's DataDome protection
+        # blocks the whole Webshare datacenter proxy pool, so the session
+        # proxy (picked for Storia) would only get these requests blocked.
+        env = os.environ.copy()
+        env.pop("PROXY_URL", None)
         try:
             proc = subprocess.Popen(
-                ["python", script],
+                [sys.executable, script],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
+                env=env,
             )
-            stdout, stderr = proc.communicate(input=json.dumps(urls))
+            try:
+                stdout, stderr = proc.communicate(input=json.dumps(urls), timeout=90)
+            except __import__("subprocess").TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                print(f"  [imobiliare batch timeout] killed after 90s — treating as blocked")
+                return []
             if stdout.strip():
                 try:
                     return json.loads(stdout.strip())
@@ -272,27 +294,42 @@ class ImobiliareRoScraper(PlatformScraper):
                 rooms = m.group(1) if m else bedroom_raw
 
             # ── Area (sqm) ────────────────────────────────────────────────────
-            # Not a structured field — best-effort regex on the short summary
-            # RealEstateListing.description e.g. "apartament cu 2 camere, ..., 53 mp, ..."
+            # Primary: RealEstateListing.floorSize.value (structured)
+            # Fallback: regex on the short summary description
             area_sqm = None
-            summary = listing.get("description", "")
-            if summary:
-                m = re.search(r"(\d+)\s*mp", summary)
-                if m:
-                    area_sqm = m.group(1)
+            floor_size = listing.get("floorSize", {})
+            if isinstance(floor_size, dict) and floor_size.get("value") not in (None, ""):
+                try:
+                    area_sqm = str(floor_size["value"])
+                except Exception:
+                    pass
+            if area_sqm is None:
+                summary = listing.get("description", "")
+                if summary:
+                    m = re.search(r"(\d+)\s*mp", summary)
+                    if m:
+                        area_sqm = m.group(1)
 
-            # ── Source ID ─────────────────────────────────────────────────────
-            # Prefer dataLayer listing_id; fall back to numeric suffix in URL
             source_id = str(dl.get("listing_id", ""))
             if not source_id:
                 m = re.search(r"-(\d+)$", url.rstrip("/"))
                 source_id = m.group(1) if m else ""
 
-            # ── Images ────────────────────────────────────────────────────────
-            # Product.image[].@id = CDN URL with OG transform:
-            #   https://i.roamcdn.net/prop/imo/og-image-full-1200w-630h/<hash>/-/<path>.jpg
-            # We use the OG URL directly as medium + large (1200×630, always valid).
-            # thumbnail and small are left empty — card renderer falls back to medium.
+            # ── Property type from URL path ────────────────────────────────────
+            # Imobiliare encodes the property category in the URL:
+            #   /inchirieri-apartamente/ → "Apartament"
+            #   /inchirieri-garsoniere/  → "Garsoniera"
+            #   /inchirieri-case-vile/   → "Casa/Vila"
+            _URL_TYPE_MAP = {
+                "inchirieri-apartamente": "Apartament",
+                "inchirieri-garsoniere":  "Garsoniera",
+                "inchirieri-case-vile":   "Casa/Vila",
+            }
+            property_type = next(
+                (pt for seg, pt in _URL_TYPE_MAP.items() if seg in url),
+                None,
+            )
+
             raw_images = product.get("image", [])
             image_urls = []
             for img in raw_images:
@@ -306,7 +343,38 @@ class ImobiliareRoScraper(PlatformScraper):
                     "large":     og_url,
                 })
 
-            return {
+            # dl keys already consumed at top level — skip them in extras
+            _USED_DL = {
+                "listing_id", "listing_location_title",
+                "listing_location_slug", "onesignal_listing_bedroom",
+            }
+            extras: dict = {}
+
+            # RealEstateListing structured fields
+            for ld_key in ("floorLevel", "numberOfRooms", "numberOfBathroomsTotal", "yearBuilt"):
+                val = listing.get(ld_key)
+                if val not in (None, ""):
+                    extras[ld_key] = val
+            if isinstance(floor_size, dict) and floor_size.get("value") not in (None, ""):
+                extras["floorSizeValue"] = floor_size["value"]
+                extras["floorSizeUnit"]  = floor_size.get("unitCode", "")
+
+            # additionalProperty arrays on Product and RealEstateListing nodes
+            for prop in (
+                listing.get("additionalProperty", [])
+                + product.get("additionalProperty", [])
+            ):
+                name = prop.get("name") or prop.get("propertyID", "")
+                val  = prop.get("value")
+                if name and val not in (None, ""):
+                    extras[name] = val
+
+            # Remaining dataLayer fields (all are listing-specific attributes)
+            for k, v in dl.items():
+                if k not in _USED_DL and v not in (None, "", [], {}):
+                    extras[k] = v
+
+            result = {
                 "platform_id":        self.platform_id,
                 "platform":           self.display_name,
                 "source_id":          source_id,
@@ -321,7 +389,11 @@ class ImobiliareRoScraper(PlatformScraper):
                 "rooms":              rooms,
                 "area_sqm":           area_sqm,
                 "image_urls":         image_urls,
+                "extras":             extras if extras else None,
             }
+            if property_type:
+                result["property_type"] = property_type
+            return result
 
         except Exception as e:
             print(f"  [imobiliare parse error] {url}: {e}")

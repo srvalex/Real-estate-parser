@@ -1,0 +1,40 @@
+# Local databases and caches — not needed in container
+ChromaDB/
+*.db
+*.sqlite
+*.log
+*.csv
+
+# Credentials — injected as Cloud Run env vars / secrets instead
+.env
+*.json
+!Streamlit Interface/districts.json
+!Streamlit Interface/proximity.json
+
+# Proxy file — injected via PROXY_LIST env var in Cloud Run
+Webshare*.txt
+*.pem
+
+# Crawler state — ephemeral in containers
+.crawler_proxy_state.json
+
+# Streamlit UI — not needed in the crawler container
+Streamlit Interface/
+!Streamlit Interface/districts.json
+!Streamlit Interface/proximity.json
+
+# Dev artifacts
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.vscode/
+*.bat
+
+# Large or irrelevant files
+Video/
+"helper notebooks"/
+Roadmap.md
+documentation.txt
+normalized_listings.csv

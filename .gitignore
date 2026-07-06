@@ -1,24 +1,66 @@
-# Databases
+# ── Databases ─────────────────────────────────────────────────────────────────
 properties.db
 real_estate.db
+real_estate*.db
 
-# Firebase credentials (secrets)
+# ── Secrets & credentials ─────────────────────────────────────────────────────
+.env
+env
+cert.pem
+*-sa-key.json
+*-adminsdk-*.json
+streamlit-sa-key.json
 real-estate-parser-f44a0-firebase-adminsdk-fbsvc-56cddcced1.json
 
-# Raw/processed data files
+# ── Proxy lists (contain credentials) ────────────────────────────────────────
+*.proxies.txt
+Webshare*.txt
+
+# ── Crawler runtime state ─────────────────────────────────────────────────────
+.crawler_proxy_state.json
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+venv/
+
+# ── Diagnostic/log scratch files ──────────────────────────────────────────────
+*.log
+
+# ── Generated demo output (regenerated live during the presentation) ────────
+demo/output/
+
+# ── Claude Code memory (local only) ──────────────────────────────────────────
+.claude/
+
+# ── Raw / processed data files ────────────────────────────────────────────────
 Date OLX.csv
 Date Storia Procesate.csv
 Date Storia Raw.json
 results.csv
 grok_keywords.txt
+normalized_listings.csv
 
-# Python cache
-__pycache__/
-Streamlit Interface/__pycache__/
+# ── Local vector stores (replaced by Supabase pgvector) ──────────────────────
+chroma db/my_local_db/
+ChromaDB/
 
-# Scratch / raw data dirs
+# ── Scratch / raw data dirs ───────────────────────────────────────────────────
 stored data/
 others/
 
-# Local ChromaDB vector store
-chroma db/my_local_db/
+# ── Large media files ─────────────────────────────────────────────────────────
+Video/
+
+# ── Helper notebooks (research/dev — may contain embedded tokens/paths) ───────
+helper notebooks/
+
+# ── Deprecated / archived code (kept locally, not pushed) ────────────────────
+Deprecated functions/
+
+# ── Misc local files ──────────────────────────────────────────────────────────
+run_crawler.bat
+CLAUDE.md

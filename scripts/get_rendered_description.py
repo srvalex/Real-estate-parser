@@ -3,6 +3,8 @@ import json
 import asyncio
 import sys
 import io
+import os
+import re
 from playwright.async_api import async_playwright
 
 async def get_storia_manual(url):
@@ -56,6 +58,39 @@ import sys
 import json
 from playwright.async_api import async_playwright
 
+
+def classify_storia_page(content: str, url: str) -> dict:
+    """Classify a Storia listing page using its explicit archive marker first."""
+    lowered = content.lower()
+    expired_markers = (
+        'data-sentry-element="ExpiredAdContentLayout"',
+        'data-cy="expired-ad-alert"',
+        'arhiveaza:',
+        'anunț arhivat',
+        'anunt arhivat',
+        'anunțul nu mai este disponibil',
+        'anuntul nu mai este disponibil',
+    )
+    if any(marker.lower() in lowered for marker in expired_markers):
+        return {"url": url, "status": "expired", "data": {}}
+
+    try:
+        raw_json = re.findall(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', content, flags=re.S)
+        if raw_json:
+            full_data = json.loads(raw_json[0])
+            offer_data = full_data.get('props', {}).get('pageProps', {}).get('ad', {})
+            # A live listing always has an `id` field in the ad object.
+            # If __NEXT_DATA__ is present but the ad is empty (redirected to a search
+            # or home page that has its own __NEXT_DATA__), the listing was removed.
+            if not offer_data or not offer_data.get('id'):
+                return {"url": url, "status": "expired", "data": {}}
+            return {"url": url, "status": "success", "data": offer_data}
+    except Exception:
+        pass
+
+    return {"url": url, "status": "blocked", "message": "no __NEXT_DATA__ and no expired marker"}
+
+
 async def fetch_url(context, url):
     page = await context.new_page()
     # OPTIMIZATION: Block images and css to save 70% bandwidth/time
@@ -64,23 +99,15 @@ async def fetch_url(context, url):
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-        # Fast path: try to extract __NEXT_DATA__ (present on live listings)
-        try:
-            raw_json = await page.evaluate('() => document.getElementById("__NEXT_DATA__").textContent')
-            full_data = json.loads(raw_json)
-            offer_data = full_data.get('props', {}).get('pageProps', {}).get('ad', {})
-            return {"url": url, "status": "success", "data": offer_data}
-        except Exception:
-            pass
-
-        # __NEXT_DATA__ missing — check whether Storia explicitly marks this as expired
-        content = await page.content()
-        if 'data-sentry-element="ExpiredAdContentLayout"' in content:
+        # If the browser was redirected away from the listing URL, the ad was removed.
+        # Storia listing URLs always contain /ro/oferta/; a redirect to a search or
+        # home page is a definitive expiry signal even without any expiry marker.
+        final_url = page.url
+        if "/ro/oferta/" not in final_url:
             return {"url": url, "status": "expired", "data": {}}
 
-        # Page loaded but no data and no expired marker → request was blocked or
-        # page structure changed; treat as transient — will be retried next run.
-        return {"url": url, "status": "blocked", "message": "no __NEXT_DATA__ and no expired marker"}
+        content = await page.content()
+        return classify_storia_page(content, url)
 
     except Exception as e:
         # Playwright-level failure (timeout, navigation error) → blocked / transient
@@ -88,21 +115,35 @@ async def fetch_url(context, url):
     finally:
         await page.close()
 
+def _playwright_proxy() -> dict | None:
+    """Parse PROXY_URL env var into the dict Playwright's new_context() expects."""
+    from urllib.parse import urlparse
+    raw = os.environ.get("PROXY_URL", "").strip()
+    if not raw:
+        return None
+    p = urlparse(raw)
+    proxy = {"server": f"{p.scheme}://{p.hostname}:{p.port}"}
+    if p.username:
+        proxy["username"] = p.username
+    if p.password:
+        proxy["password"] = p.password
+    return proxy
+
+
 async def scrape_batch(urls):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent="Mozilla/5.0... Chrome/122.0.0.0")
-        
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            proxy=_playwright_proxy(),
+        )
+
         # Run all URLs in this batch simultaneously
         tasks = [fetch_url(context, url) for url in urls]
         results = await asyncio.gather(*tasks)
-        
+
         await browser.close()
         return results
-
-# Inside get_rendered_description.py
-# Force UTF-8 for Windows output to avoid encoding crashes
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 def safe_serialize(obj):
     """Recursively converts non-serializable objects to strings."""
@@ -116,6 +157,9 @@ def safe_serialize(obj):
         return str(obj)
 
 if __name__ == "__main__":
+    # Force UTF-8 for Windows stdout to avoid encoding crashes in the subprocess
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
     # Read from stdin
     input_data = sys.stdin.read().strip()
     if not input_data:
