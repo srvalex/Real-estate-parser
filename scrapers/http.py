@@ -38,9 +38,10 @@ def get_proxy() -> str | None:
     return _current_proxy
 
 
-def get_content(url: str) -> str | None:
+def get_content(url: str, use_proxy: bool = True) -> str | None:
     proxies = (
-        {"https": _current_proxy, "http": _current_proxy} if _current_proxy else None
+        {"https": _current_proxy, "http": _current_proxy}
+        if (use_proxy and _current_proxy) else None
     )
     try:
         response = requests.get(

@@ -22,6 +22,11 @@ import time
 try:
     from dotenv import load_dotenv
     load_dotenv()
+    # Also try a file named "env" (without the dot) as a fallback
+    if not os.environ.get("SUPABASE_URL"):
+        _env_path = os.path.join(os.path.dirname(__file__), "env")
+        if os.path.exists(_env_path):
+            load_dotenv(_env_path)
 except ImportError:
     pass
 
@@ -297,11 +302,15 @@ def get_all_db_urls(table: str = "listings") -> set[str]:
     return urls
 
 
-def get_listings_for_availability_check(platform_id: str | None = None) -> list[dict]:
-    """Return [{url, platform_id}] for all listings not yet confirmed expired.
+def get_listings_for_availability_check(
+    platform_id: str | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """Return [{url, platform_id}] for listings not yet confirmed expired.
 
     Includes is_available=1 (re-confirm still live) and NULL (never checked).
     Skips is_available=0 (already confirmed expired — no point re-checking).
+    If limit is set, returns at most that many rows.
     """
     client = get_client()
     rows: list[dict] = []
@@ -318,8 +327,13 @@ def get_listings_for_availability_check(platform_id: str | None = None) -> list[
                 q = q.eq("platform_id", platform_id)
             resp = q.range(offset, offset + page_size - 1).execute()
             batch = resp.data or []
+            if limit is not None:
+                remaining = limit - len(rows)
+                if remaining <= 0:
+                    break
+                batch = batch[:remaining]
             rows.extend(batch)
-            if len(batch) < page_size:
+            if len(batch) < page_size or (limit is not None and len(rows) >= limit):
                 break
             offset += page_size
         except Exception as e:
@@ -334,13 +348,16 @@ def batch_update_availability(updates: list[dict]) -> int:
 
     Uses UPDATE ... WHERE url IN (...) grouped by status value so only
     is_available is touched and no NOT-NULL columns are at risk.
+    Also stamps last_seen_at when confirming a listing is still live.
     Returns the number of rows processed.
     """
     if not updates:
         return 0
     from collections import defaultdict
+    from datetime import datetime
     client = get_client()
     total = 0
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     CHUNK = 500
     for i in range(0, len(updates), CHUNK):
         chunk = updates[i : i + CHUNK]
@@ -350,7 +367,10 @@ def batch_update_availability(updates: list[dict]) -> int:
             by_status[row["is_available"]].append(row["url"])
         try:
             for status, urls in by_status.items():
-                client.table("listings").update({"is_available": status}).in_("url", urls).execute()
+                fields = {"is_available": status}
+                if status == 1:
+                    fields["last_seen_at"] = now
+                client.table("listings").update(fields).in_("url", urls).execute()
             total += len(chunk)
         except Exception as e:
             print(f"  [supabase] batch_update_availability failed: {e}")

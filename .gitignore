@@ -5,6 +5,7 @@ real_estate*.db
 
 # ── Secrets & credentials ─────────────────────────────────────────────────────
 .env
+env
 cert.pem
 *-sa-key.json
 *-adminsdk-*.json
@@ -22,6 +23,15 @@ Webshare*.txt
 __pycache__/
 *.pyc
 *.pyo
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+venv/
+
+# ── Diagnostic/log scratch files ──────────────────────────────────────────────
+*.log
+
+# ── Generated demo output (regenerated live during the presentation) ────────
+demo/output/
 
 # ── Claude Code memory (local only) ──────────────────────────────────────────
 .claude/

@@ -39,6 +39,7 @@ class PlatformScraper(ABC):
         full_sectors: list[str] | None = None,
         partial_by_sector: dict | None = None,
     ) -> list[str]:
+        raise NotImplementedError
 
 
     @abstractmethod
@@ -47,6 +48,7 @@ class PlatformScraper(ABC):
         Fetch one or more search-result pages and return all listing URLs
         found on them, fully qualified and normalised.
         """
+        raise NotImplementedError
 
     def owns_url(self, url: str) -> bool:
         """Return True if `url` belongs to this platform."""
@@ -73,3 +75,4 @@ class PlatformScraper(ABC):
 
         Return None on any parse failure — the pipeline will skip silently.
         """
+        raise NotImplementedError

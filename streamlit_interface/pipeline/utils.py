@@ -104,6 +104,51 @@ def apply_filters(
 
     return df
 
+def rrf_fuse(
+    text_scores: dict,
+    image_scores: dict,
+    urls,
+    k: int = 60,
+    w_text: float = 0.3,
+    w_image: float = 0.7,
+) -> dict:
+    """Reciprocal Rank Fusion of two independent similarity-score dicts.
+
+    Raw cosine similarities from ST (384-dim) and CLIP (512-dim) are not
+    comparable — different models, different score distributions. RRF fuses
+    them purely by ordinal rank, making the weights scale-independent:
+
+        rrf(url) = w_text / (k + text_rank(url)) + w_image / (k + image_rank(url))
+
+    k=60 is the standard dampening constant. A URL absent from a ranked list
+    contributes 0 for that term (infinite rank). Returns raw (non-normalised)
+    RRF scores for every url in `urls` that scored > 0.
+    """
+    def _rank_map(scores: dict) -> dict:
+        return {
+            url: rank
+            for rank, (url, _) in enumerate(
+                sorted(scores.items(), key=lambda x: x[1], reverse=True), start=1
+            )
+        }
+
+    text_ranks  = _rank_map(text_scores)  if text_scores  else {}
+    image_ranks = _rank_map(image_scores) if image_scores else {}
+
+    final_scores: dict = {}
+    for url in urls:
+        t_rank = text_ranks.get(url)
+        i_rank = image_ranks.get(url)
+        score  = 0.0
+        if t_rank is not None:
+            score += w_text  / (k + t_rank)
+        if i_rank is not None:
+            score += w_image / (k + i_rank)
+        if score > 0:
+            final_scores[url] = score
+    return final_scores
+
+
 def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, skip_embed: bool = False, spacy_filters: dict = None, image_embedding: list = None):
     """Re-sort df by AI similarity score using Reciprocal Rank Fusion (RRF).
 
@@ -181,41 +226,8 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
         return df, False, embed_error
 
     # ── Reciprocal Rank Fusion ────────────────────────────────────────────────
-    # Raw cosine similarities from ST (384-dim) and CLIP (512-dim) are not
-    # comparable — different models, different score distributions. RRF fuses
-    # them purely by ordinal rank, making the weights scale-independent.
-    #
-    #   rrf(url) = W_TEXT / (K + text_rank) + W_IMAGE / (K + image_rank)
-    #
-    # Tune W_TEXT / W_IMAGE to shift emphasis between description semantics
-    # and visual appearance. K=60 is the standard dampening constant.
-    _K       = 60
-    _W_TEXT  = 0.3
-    _W_IMAGE = 0.7
-
-    def _rank_map(scores: dict) -> dict:
-        return {
-            url: rank
-            for rank, (url, _) in enumerate(
-                sorted(scores.items(), key=lambda x: x[1], reverse=True), start=1
-            )
-        }
-
-    text_ranks  = _rank_map(text_scores)  if text_scores  else {}
-    image_ranks = _rank_map(image_scores) if image_scores else {}
-
     all_urls = set(df[url_col].dropna())
-    final_scores: dict = {}
-    for url in all_urls:
-        t_rank = text_ranks.get(url)
-        i_rank = image_ranks.get(url)
-        score  = 0.0
-        if t_rank is not None:
-            score += _W_TEXT  / (_K + t_rank)
-        if i_rank is not None:
-            score += _W_IMAGE / (_K + i_rank)
-        if score > 0:
-            final_scores[url] = score
+    final_scores = rrf_fuse(text_scores, image_scores, all_urls)
 
     if not final_scores:
         return df, False, embed_error

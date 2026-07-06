@@ -13,6 +13,7 @@ import json
 import re
 import os
 import subprocess
+import sys
 from bs4 import BeautifulSoup
 from .base import PlatformScraper
 from .http import get_content
@@ -132,7 +133,10 @@ class ImobiliareRoScraper(PlatformScraper):
             else:
                 paged = f"{search_url}?page={n}"
 
-            html = get_content(paged)
+            # Imobiliare's DataDome protection blocks the entire Webshare
+            # datacenter proxy pool (confirmed 0/100 pass), but is fine with
+            # direct requests — so skip the session-wide proxy here.
+            html = get_content(paged, use_proxy=False)
             if not html:
                 continue
 
@@ -179,7 +183,13 @@ class ImobiliareRoScraper(PlatformScraper):
                 if p:
                     p["is_available"] = 1
                     parsed.append(p)
-            # blocked → drop silently
+            else:
+                parsed.append({
+                    "url":          r.get("url", ""),
+                    "platform_id":  self.platform_id,
+                    "is_available": None,
+                    "status":       status,
+                })
         return parsed
 
     def scrape_listing_with_status(self, url: str) -> dict:
@@ -202,16 +212,28 @@ class ImobiliareRoScraper(PlatformScraper):
         script = os.path.join(
             os.path.dirname(__file__), "..", "scripts", "get_imobiliare_listing.py"
         )
+        # Drop PROXY_URL for this subprocess — Imobiliare's DataDome protection
+        # blocks the whole Webshare datacenter proxy pool, so the session
+        # proxy (picked for Storia) would only get these requests blocked.
+        env = os.environ.copy()
+        env.pop("PROXY_URL", None)
         try:
             proc = subprocess.Popen(
-                ["python", script],
+                [sys.executable, script],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
+                env=env,
             )
-            stdout, stderr = proc.communicate(input=json.dumps(urls))
+            try:
+                stdout, stderr = proc.communicate(input=json.dumps(urls), timeout=90)
+            except __import__("subprocess").TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                print(f"  [imobiliare batch timeout] killed after 90s — treating as blocked")
+                return []
             if stdout.strip():
                 try:
                     return json.loads(stdout.strip())

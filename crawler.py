@@ -133,12 +133,60 @@ class ProxyRotator:
         except Exception:
             return False
 
-    def apply_for_session(self) -> str | None:
+    def _verify_for_storia(self, proxy_url: str) -> bool:
+        """Return True if the proxy is NOT blocked by Storia's Cloudflare.
+
+        Fetches a search page (stable URL, never expires) and checks for
+        __NEXT_DATA__ — present on every real Storia page, absent on CF challenges.
+        """
+        from curl_cffi import requests as cffi_requests
+        try:
+            r = cffi_requests.get(
+                "https://www.storia.ro/ro/rezultate/inchiriere/apartament/bucuresti/",
+                proxies={"https": proxy_url, "http": proxy_url},
+                impersonate="chrome120",
+                timeout=15,
+            )
+            return r.status_code == 200 and "__NEXT_DATA__" in r.text
+        except Exception:
+            return False
+
+    def _verify_for_imobiliare(self, proxy_url: str) -> bool:
+        """Return True if the proxy is NOT blocked by Imobiliare.ro.
+
+        Fetches the Bucharest rentals search page and checks for
+        application/ld+json — present on every real Imobiliare page,
+        absent when the proxy is blocked or served a bot-challenge page.
+        """
+        from curl_cffi import requests as cffi_requests
+        try:
+            r = cffi_requests.get(
+                "https://www.imobiliare.ro/inchirieri-apartamente/bucuresti",
+                proxies={"https": proxy_url, "http": proxy_url},
+                impersonate="chrome120",
+                timeout=15,
+            )
+            return r.status_code == 200 and "application/ld+json" in r.text
+        except Exception:
+            return False
+
+    def apply_for_session(self, check_platforms: list[str] | None = None) -> str | None:
         """
         Pick one proxy for this crawl run (round-robin across runs).
-        Tries proxies in order until one passes the health check, then applies
-        it globally for the lifetime of this process.
+        Tries proxies in order until one passes:
+          1. Basic connectivity (api.ipify.org)
+          2. Platform checks — verifies the proxy can reach a real page
+             (not a CF challenge) for each platform in check_platforms.
         Returns the chosen proxy URL, or None if unavailable / all dead.
+
+        Imobiliare is deliberately excluded here: its DataDome protection
+        blocks the entire Webshare datacenter IP range (confirmed 0/100 pass
+        rate), while direct/unproxied requests succeed fine. Gating proxy
+        selection on an imobiliare check that can never pass meant the AND
+        across platforms always failed, so every combined-platform crawl
+        silently fell back to no proxy at all — including for Storia, which
+        actually needs one. Imobiliare's own scraper always bypasses the
+        session proxy (see ImobiliareRoScraper), so it's unaffected either way.
         """
         if not self._proxies:
             print("  [proxies] no proxy file supplied — crawling without proxy")
@@ -146,23 +194,29 @@ class ProxyRotator:
 
         start_idx = self._load_index()
         n = len(self._proxies)
+        check_storia = bool(check_platforms and "storia" in check_platforms)
 
         for offset in range(n):
             idx = (start_idx + offset) % n
             proxy = self._proxies[idx]
             display = proxy.split("@")[-1]  # hide credentials in logs
             print(f"  [proxies] checking {idx + 1}/{n}: {display} … ", end="", flush=True)
-            if self._verify(proxy):
-                print("OK")
-                self._save_index((idx + 1) % n)  # next session starts on idx+1
-                _http.set_proxy(proxy)
-                os.environ["PROXY_URL"] = proxy
-                print(f"  [proxies] session proxy set to {display}")
-                return proxy
-            else:
+            if not self._verify(proxy):
                 print("dead — trying next")
+                continue
+            if check_storia:
+                print("connectivity OK … storia … ", end="", flush=True)
+                if not self._verify_for_storia(proxy):
+                    print("blocked by Cloudflare — trying next")
+                    continue
+            print("OK")
+            self._save_index((idx + 1) % n)  # next session starts on idx+1
+            _http.set_proxy(proxy)
+            os.environ["PROXY_URL"] = proxy
+            print(f"  [proxies] session proxy set to {display}")
+            return proxy
 
-        print("  [proxies] ⚠️  all proxies failed health check — crawling without proxy")
+        print("  [proxies] WARNING: all proxies failed health check — crawling without proxy")
         _http.set_proxy(None)
         os.environ.pop("PROXY_URL", None)
         return None
@@ -256,7 +310,8 @@ def _scrape_and_save(
             for i in range(0, len(urls), scraper.BATCH_SIZE):
                 chunk = urls[i : i + scraper.BATCH_SIZE]
                 batch = scraper.scrape_batch(chunk)
-                all_new.extend(batch)
+                # blocked → is_available is None; skip them (retried next crawl)
+                all_new.extend(r for r in batch if r.get("is_available") is not None)
                 time.sleep(random.uniform(0.8, 2.5))
         else:
             for url in urls:
@@ -499,17 +554,27 @@ def _trigger_embedder_job() -> None:
         print(f"[embed-trigger] could not trigger embedder-job: {e}", flush=True)
 
 
-def run_availability_check(platforms: list[str] | None = None) -> None:
+def run_availability_check(
+    platforms: list[str] | None = None,
+    limit: int | None = None,
+) -> None:
     """Check every non-expired listing and mark unavailable ones is_available=0.
 
     Skips listings already at is_available=0 (confirmed expired).
     Skips blocked/network errors — they'll be retried on the next weekly run.
     Flushes DB updates in chunks of 100 so progress is not lost if the job dies.
+
+    A "tombstone" row (created when a listing was found expired on its very
+    first scrape) only ever has url/platform_id/is_available/scraped_at set.
+    If a later recheck finds it's actually live, a full scrape result is
+    available right here — so it's saved via save_to_db() (upserts every
+    field) instead of just flipping the flag, otherwise the row stays
+    permanently blank even though is_available=1.
     """
     import db_utils
 
     print("\n[avail-check] Fetching listings to check…", flush=True)
-    all_listings = db_utils.get_listings_for_availability_check()
+    all_listings = db_utils.get_listings_for_availability_check(limit=limit)
     if not all_listings:
         print("[avail-check] Nothing to check.", flush=True)
         return
@@ -529,13 +594,18 @@ def run_availability_check(platforms: list[str] | None = None) -> None:
 
     total_checked = 0
     total_expired = 0
+    total_blocked = 0
     pending: list[dict] = []
+    pending_rich: list[dict] = []
 
     def _flush(force: bool = False):
-        nonlocal pending
+        nonlocal pending, pending_rich
         if pending and (force or len(pending) >= 100):
             db_utils.batch_update_availability(pending)
             pending = []
+        if pending_rich and (force or len(pending_rich) >= 100):
+            db_utils.save_to_db(pending_rich)
+            pending_rich = []
 
     for pid, urls in by_platform.items():
         if platforms and pid not in platforms:
@@ -556,7 +626,9 @@ def run_availability_check(platforms: list[str] | None = None) -> None:
                     pending.append({"url": url, "is_available": 0})
                     total_expired += 1
                 elif status == "success":
-                    pending.append({"url": url, "is_available": 1})
+                    data = result["data"]
+                    data["is_available"] = 1
+                    pending_rich.append(data)
                 # blocked → leave is_available unchanged
                 _flush()
                 if idx % 100 == 0:
@@ -572,28 +644,39 @@ def run_availability_check(platforms: list[str] | None = None) -> None:
             for i in range(0, len(urls), BATCH):
                 chunk = urls[i : i + BATCH]
                 results = scraper.scrape_batch(chunk)
-                result_map = {r.get("url"): r.get("is_available") for r in results if r.get("url")}
+                result_map = {r.get("url"): r for r in results if r.get("url")}
                 for url in chunk:
-                    avail = result_map.get(url)
+                    entry = result_map.get(url)
+                    if entry is None:
+                        continue
+                    avail = entry.get("is_available")
                     if avail is None:
-                        continue  # blocked — skip
+                        total_blocked += 1
+                        continue
                     total_checked += 1
-                    pending.append({"url": url, "is_available": avail})
+                    if avail == 1 and entry.get("platform"):
+                        # Full scrape result (has title/price/etc, not just a
+                        # bare tombstone flip) -- persist all of it.
+                        pending_rich.append(entry)
+                    else:
+                        pending.append({"url": url, "is_available": avail})
                     if avail == 0:
                         total_expired += 1
                 _flush()
+                time.sleep(1.5)
 
         _flush(force=True)
         print(
             f"[avail-check] {pid}: done. "
-            f"{total_checked} checked, {total_expired} expired total.",
+            f"{total_checked} definitive checks, {total_blocked} blocked, "
+            f"{total_expired} expired total.",
             flush=True,
         )
 
     _flush(force=True)
     print(
-        f"\n[avail-check] Finished: {total_checked} checked, "
-        f"{total_expired} newly marked expired.",
+        f"\n[avail-check] Finished: {total_checked} definitive checks, "
+        f"{total_blocked} blocked, {total_expired} newly marked expired.",
         flush=True,
     )
 
@@ -639,6 +722,12 @@ def main():
         help="Path to a text file with one proxy URL per line (http://user:pass@host:port)",
     )
     parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="For availability-check: process only the first N listings and stop.",
+    )
+    parser.add_argument(
         "--loop",
         action="store_true",
         help="Run continuously, sleeping a random interval between crawls (use with Task Scheduler at boot)",
@@ -679,10 +768,11 @@ def main():
         rotator = ProxyRotator([])
 
     if args.mode == "availability-check":
-        rotator.apply_for_session()
+        rotator.apply_for_session(check_platforms=platforms)
         run_availability_check(
             platforms=None if args.platform == "all"
-            else [p.strip() for p in args.platform.split(",")]
+            else [p.strip() for p in args.platform.split(",")],
+            limit=args.limit,
         )
         sys.exit(0)
 
@@ -702,7 +792,7 @@ def main():
             f"   started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        rotator.apply_for_session()
+        rotator.apply_for_session(check_platforms=platforms)
 
         if args.mode == "full":
             run_full_crawl(

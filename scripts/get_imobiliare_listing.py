@@ -22,7 +22,33 @@ import sys
 import io
 from urllib.parse import urlparse
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+def classify_imobiliare_page(content: str, requested_url: str, final_url: str) -> dict:
+    """Classify an Imobiliare listing page as live, expired, or blocked."""
+    lowered = content.lower()
+    unavailable_markers = (
+        "nu se primesc cereri pentru această proprietate",
+        "nu se primesc cereri pentru aceasta proprietate",
+        "anunțul nu mai este disponibil",
+        "anuntul nu mai este disponibil",
+        "nu mai este disponibil",
+        "nu mai este activ",
+        "anunț arhivat",
+        "anunt arhivat",
+        "deja închiriat",
+        "deja inchiriat",
+        # NOTE: "rezervat" and "vândut"/"vindut" were removed — every page's
+        # footer reads "Toate drepturile rezervate" (all rights reserved),
+        # which matched "rezervat" and false-flagged 100% of live listings
+        # as expired.
+    )
+
+    if any(marker in lowered for marker in unavailable_markers):
+        return {"url": requested_url, "status": "expired"}
+
+    # Redirect-based detection removed: a blocked proxy redirects to the same
+    # homepage as a genuine expired listing, making them indistinguishable.
+    # Expiry is instead inferred from absent JSON-LD in fetch_url below.
+    return {"url": requested_url, "status": "blocked", "message": "no explicit expiry marker found"}
 
 
 def _playwright_proxy() -> dict | None:
@@ -52,11 +78,10 @@ async def fetch_url(context, url: str) -> dict:
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-        # ── Expired detection: listing redirects to homepage/search ──────────
-        final_url = page.url.rstrip("/")
-        requested  = url.rstrip("/")
-        if final_url != requested and "/oferta/" not in final_url:
-            return {"url": url, "status": "expired"}
+        content = await page.content()
+        result = classify_imobiliare_page(content, url, page.url)
+        if result["status"] == "expired":
+            return result
 
         # ── Extract JSON-LD ───────────────────────────────────────────────────
         ld_blocks = await page.evaluate(
@@ -135,6 +160,8 @@ def safe_serialize(obj):
 
 
 if __name__ == "__main__":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
     input_data = sys.stdin.read().strip()
     if not input_data:
         sys.exit(0)

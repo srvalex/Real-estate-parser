@@ -222,9 +222,11 @@ def run_pipeline(
                 chunk = urls[i: i + scraper.BATCH_SIZE]
                 batch = scraper.scrape_batch(chunk)
                 if batch:
-                    all_new.extend(batch)
+                    # blocked → is_available is None; skip them (retried next crawl)
+                    definitive = [r for r in batch if r.get("is_available") is not None]
+                    all_new.extend(definitive)
                     # Only yield live listings to the UI — tombstones have no display data
-                    live = [r for r in batch if r.get("is_available", 1) == 1]
+                    live = [r for r in definitive if r.get("is_available", 1) == 1]
                     if live:
                         yield "progress", pd.DataFrame(live)
                 time.sleep(2)
