@@ -178,13 +178,35 @@ class StoriaScraper(PlatformScraper):
         if not data or not isinstance(data, dict):
             return None
         try:
+            # Feature/amenity tags. The old flat `features` / `featuresByCategory`
+            # fields are always empty in current Storia API responses -- the real
+            # data now lives in `additionalInformation`, grouped by category, e.g.
+            # {"label": "extras_types", "values": ["extras_types::balcony", ...]}.
+            # Flatten it into a plain tag list: positive boolean flags (suffix "y",
+            # e.g. "rent_to_students::y") emit the label itself, negative ones
+            # (suffix "n") are dropped, everything else emits the value's suffix.
+            feature_tags = []
+            for entry in data.get("additionalInformation", []) or []:
+                label = entry.get("label", "")
+                for value in entry.get("values", []) or []:
+                    suffix = str(value).rsplit("::", 1)[-1]
+                    if suffix == "n":
+                        continue
+                    feature_tags.append(label if suffix == "y" else suffix)
+
             result = {
                 "platform_id": self.platform_id,
                 "platform":    self.display_name,
                 "source_id":   str(data.get("id", "")),
-                "url":         data.get("url", raw.get("url", "")),
+                # Prefer the URL we actually requested over Storia's own
+                # self-reported `data["url"]` -- their internal slug can drift
+                # after the ad was first scraped (e.g. "centrala-parcare" ->
+                # "centralaparcare"), and save_to_db() upserts on this field.
+                # Trusting the drifted value creates a duplicate row instead
+                # of updating the existing one on every re-check.
+                "url":         raw.get("url") or data.get("url", ""),
                 "title":       data.get("title", ""),
-                "features":    str(data.get("features", [])),
+                "features":    str(feature_tags),
             }
 
             # Characteristics (rooms, area, etc.)
@@ -240,6 +262,13 @@ class StoriaScraper(PlatformScraper):
                 result["property_type"] = _ESTATE_MAP.get(
                     str(estate_raw).lower(), str(estate_raw)
                 )
+
+            # Preserve the entire raw ad object verbatim. When Storia changes
+            # their internal data model again (as happened with `features` /
+            # `additionalInformation` -- see StoriaFeaturesExtractionTests),
+            # the original payload is still here to re-derive fields from
+            # without needing to re-scrape an ad that may have expired since.
+            result["extras"] = data
 
             return result
         except Exception as e:
