@@ -163,9 +163,15 @@ class StoriaScraper(PlatformScraper):
                     timeout=20,
                     allow_redirects=True,
                 )
-                final_url = str(r.url)
-                if "/ro/oferta/" not in final_url:
-                    return {"url": url, "status": "expired", "data": {}}
+                # Do NOT treat "redirected away from /ro/oferta/" as expired by
+                # itself: Storia's bot-protection can also redirect off-path
+                # when it blocks a request, and blindly trusting the URL shape
+                # turned real blocks into false "expired" tombstones. Always
+                # let classify_storia_page decide from the actual page content
+                # it landed on — it already distinguishes all three cases
+                # correctly: a redirect to search/home (NEXT_DATA present, no
+                # `ad` key) → expired; a bot-challenge page (no NEXT_DATA, no
+                # expired marker) → blocked; the live ad itself → success.
                 return classify_storia_page(r.text, url)
             except Exception as e:
                 return {"url": url, "status": "blocked", "message": str(e)}

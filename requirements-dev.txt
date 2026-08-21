@@ -1,0 +1,72 @@
+# ============================================================================
+# requirements-dev.txt
+# ----------------------------------------------------------------------------
+# Full local development environment: everything needed to run the Streamlit
+# app, the crawler, the full unit test suite (tests/), and every ML model
+# used anywhere in the pipeline (SentenceTransformer, CLIP, spaCy) on one
+# machine.
+#
+# This is the union of requirements.txt, requirements-crawler.txt, and
+# streamlit_interface/requirements.txt — kept as ONE file for local dev so a
+# fresh machine only needs one `pip install`. Those three files still exist
+# on purpose and should NOT be merged into this one: they're each scoped to
+# a specific Docker image (crawler-job, embedder-job, Streamlit) and staying
+# minimal keeps those images small and their dependency surface auditable.
+# If you add a new import to code that ships in one of those images, update
+# that image's requirements file too, not just this one.
+#
+# embedding-service/requirements.txt (fastapi/uvicorn) is intentionally NOT
+# included here — that's the abandoned always-on Cloud Run Service path
+# (superseded by embed_job.py, a plain script with no HTTP server; see
+# Roadmap.md tech debt). Add it back only if main.py is revived.
+#
+# Setup on a new machine:
+#   python3 -m venv venv
+#   source venv/bin/activate        # Windows: venv\Scripts\activate
+#   pip install -r requirements-dev.txt
+#   python -m unittest discover -s tests -v
+# ============================================================================
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest
+
+# ── Web / scraping ────────────────────────────────────────────────────────────
+playwright
+beautifulsoup4
+requests
+curl_cffi
+
+# ── App framework ─────────────────────────────────────────────────────────────
+streamlit
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+pandas
+numpy<2
+tqdm
+
+# ── Database ──────────────────────────────────────────────────────────────────
+supabase
+python-dotenv
+
+# ── Visualisation ─────────────────────────────────────────────────────────────
+plotly
+
+# ── Auth (Cloud Run job trigger from Streamlit / crawler) ────────────────────
+google-auth
+
+# ── NLP ───────────────────────────────────────────────────────────────────────
+# spaCy + Romanian model (versions must match — bump both together)
+spacy>=3.7,<3.8
+https://github.com/explosion/spacy-models/releases/download/ro_core_news_sm-3.7.0/ro_core_news_sm-3.7.0-py3-none-any.whl
+
+# ── AI / Embeddings ───────────────────────────────────────────────────────────
+sentence-transformers
+
+# CPU-only PyTorch — avoids the multi-GB CUDA wheel; you don't need a GPU to
+# run these models locally or in tests.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+
+# CLIP text + vision towers (image search / template photo picker)
+transformers
+pillow

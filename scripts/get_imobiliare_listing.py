@@ -11,8 +11,18 @@ Each result dict has:
   ld      dict  (merged JSON-LD nodes: product, offer, listing)   — success only
   dl      dict  (dataLayer listing entry)                          — success only
 
-Expired detection: imobiliare.ro redirects removed listings to the homepage.
-We compare the final page URL against the requested URL — mismatch = expired.
+Expired detection, in order:
+  1. Explicit unavailable text markers (classify_imobiliare_page).
+  2. JSON-LD @graph shape (classify_imobiliare_ld_graph): a removed listing
+     does NOT redirect and shows no text marker — imobiliare.ro silently
+     serves a search-results page's content at the *same* URL. That page's
+     graph carries @type ["Organization", "SearchResultsPage"], never
+     "Product"/"Offer" — the only way to tell a genuine removal apart from
+     a bot-challenge stub (which has no JSON-LD at all). Confirmed live
+     2026-08-22 against a real removed listing.
+Redirect-based detection was deliberately removed earlier: a blocked proxy
+redirects to the same homepage as a genuine expired listing, making them
+indistinguishable by URL alone.
 """
 
 import asyncio
@@ -21,6 +31,38 @@ import os
 import sys
 import io
 from urllib.parse import urlparse
+
+def classify_imobiliare_ld_graph(graph_types: list) -> dict | None:
+    """Classify a page from the @type values of its already-parsed JSON-LD
+    @graph nodes (across all ld+json blocks on the page).
+
+    A genuinely removed listing on Imobiliare does NOT redirect and shows no
+    text marker — it silently serves a search-results page's content at the
+    exact same URL. That page's graph carries
+    @type: ["Organization", "SearchResultsPage"], never "Product"/"Offer".
+    Confirmed live (2026-08-22) against a user-reported unavailable listing.
+
+    Returns:
+      {"status": "expired"}                 — Product/Offer absent, but
+          SearchResultsPage IS present: positively identified as a
+          search/listing page, not the ad itself.
+      {"status": "blocked", "message": ...} — no JSON-LD nodes at all
+          (bot-challenge stub), or JSON-LD present but neither a listing
+          nor a recognisable search page — never assume expired without a
+          positive signal.
+      None                                  — Product or Offer present;
+          caller should proceed with normal listing extraction.
+    """
+    if not graph_types:
+        return {"status": "blocked", "message": "no JSON-LD found"}
+
+    types = set(graph_types)
+    if types & {"Product", "Offer"}:
+        return None
+    if "SearchResultsPage" in types:
+        return {"status": "expired"}
+    return {"status": "blocked", "message": "JSON-LD present but no listing or search-page markers"}
+
 
 def classify_imobiliare_page(content: str, requested_url: str, final_url: str) -> dict:
     """Classify an Imobiliare listing page as live, expired, or blocked."""
@@ -90,12 +132,14 @@ async def fetch_url(context, url: str) -> dict:
         )
 
         product = offer = listing = {}
+        graph_types = []
         for block in ld_blocks:
             try:
                 parsed = json.loads(block)
                 graph = parsed.get("@graph", [])
                 for node in graph:
                     t = node.get("@type", "")
+                    graph_types.append(t)
                     if t == "Product":
                         product = node
                     elif t == "Offer":
@@ -105,9 +149,10 @@ async def fetch_url(context, url: str) -> dict:
             except Exception:
                 pass
 
-        if not product and not offer:
-            # Page loaded but no structured data — treat as blocked
-            return {"url": url, "status": "blocked", "message": "no JSON-LD found"}
+        ld_verdict = classify_imobiliare_ld_graph(graph_types)
+        if ld_verdict is not None:
+            ld_verdict["url"] = url
+            return ld_verdict
 
         # ── Extract dataLayer listing entry ───────────────────────────────────
         dl_raw = await page.evaluate("() => JSON.stringify(window.dataLayer || [])")

@@ -17,6 +17,8 @@ _PROJECT_ROOT = os.path.join(_HERE, "..", "..")
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from rrf import rrf_fuse
+
 _DATA_DIR = os.path.join(_HERE, "..")   # Streamlit Interface/
 
 @st.cache_data
@@ -104,57 +106,21 @@ def apply_filters(
 
     return df
 
-def rrf_fuse(
-    text_scores: dict,
-    image_scores: dict,
-    urls,
-    k: int = 60,
-    w_text: float = 0.3,
-    w_image: float = 0.7,
-) -> dict:
-    """Reciprocal Rank Fusion of two independent similarity-score dicts.
-
-    Raw cosine similarities from ST (384-dim) and CLIP (512-dim) are not
-    comparable — different models, different score distributions. RRF fuses
-    them purely by ordinal rank, making the weights scale-independent:
-
-        rrf(url) = w_text / (k + text_rank(url)) + w_image / (k + image_rank(url))
-
-    k=60 is the standard dampening constant. A URL absent from a ranked list
-    contributes 0 for that term (infinite rank). Returns raw (non-normalised)
-    RRF scores for every url in `urls` that scored > 0.
-    """
-    def _rank_map(scores: dict) -> dict:
-        return {
-            url: rank
-            for rank, (url, _) in enumerate(
-                sorted(scores.items(), key=lambda x: x[1], reverse=True), start=1
-            )
-        }
-
-    text_ranks  = _rank_map(text_scores)  if text_scores  else {}
-    image_ranks = _rank_map(image_scores) if image_scores else {}
-
-    final_scores: dict = {}
-    for url in urls:
-        t_rank = text_ranks.get(url)
-        i_rank = image_ranks.get(url)
-        score  = 0.0
-        if t_rank is not None:
-            score += w_text  / (k + t_rank)
-        if i_rank is not None:
-            score += w_image / (k + i_rank)
-        if score > 0:
-            final_scores[url] = score
-    return final_scores
-
-
 def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, skip_embed: bool = False, spacy_filters: dict = None, image_embedding: list = None):
     """Re-sort df by AI similarity score using Reciprocal Rank Fusion (RRF).
 
-    Two independent search paths are run against Supabase pgvector:
-      - Text:  paraphrase-multilingual-MiniLM-L12-v2 (384-dim) → match_listings RPC
-      - Image: CLIP ViT-B/32 text tower (512-dim)              → match_listings_by_image RPC
+    Two independent search paths can feed the fusion:
+      - Text:  paraphrase-multilingual-MiniLM-L12-v2 (384-dim) → match_listings RPC.
+               Runs whenever the caller supplies vibe text.
+      - Image: CLIP ViT-B/32 vision tower (512-dim)            → match_listings_by_image RPC.
+               Runs ONLY when the caller supplies a pre-computed image_embedding
+               (template photo picker or an uploaded photo) — never derived from
+               vibe text. CLIP's text tower is trained on English image captions;
+               it has no reliable way to represent non-visual, relational concepts
+               ("aproape de metrou", "liniștit") that make up most vibe prompts,
+               and it wasn't trained on Romanian. Auto-encoding the vibe text
+               through it and fusing at W_IMAGE=0.7 used to silently dominate and
+               degrade every plain-text search — see CHANGELOG note below.
 
     Because the two models live in different vector spaces with different score
     distributions, their raw cosine similarities cannot be meaningfully averaged.
@@ -168,12 +134,11 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
     from a ranked list contribute 0 for that component (infinite rank).
 
     Supports three modes:
-      - text only   (image_embedding=None, vibe set)
-      - image only  (image_embedding set,  vibe empty)
-      - both        (image_embedding set,  vibe set) → RRF fusion
+      - text only   (image_embedding=None, vibe set)   → pure text_scores
+      - image only  (image_embedding set,  vibe empty) → pure image_scores
+      - both        (image_embedding set,  vibe set)   → RRF fusion of both
     Returns (df_sorted, embedding_sorted: bool, embed_error: str | None).
     """
-    hard_filter_keys = [k for k, v in (spacy_filters or {}).items() if v is True]
     embed_error = None
     has_vibe  = bool(vibe and vibe.strip())
     has_image = bool(image_embedding)
@@ -199,25 +164,19 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
         except Exception as e:
             embed_error = f"pgvector search error: {e}"
 
-    # ── Image scores via Supabase (image_embedding column) ───────────────────
+    # ── Image scores via Supabase (image_embedding column) ────────────────────
     # Cover photo CLIP embeddings are stored in listings.image_embedding (512-dim).
-    # For template photos: use the pre-computed embedding directly.
-    # For text vibe: encode with the local CLIP text tower first.
+    # Fires only for an actual image query (template photo / uploaded photo) —
+    # a text-only vibe must never be routed through CLIP here (see docstring).
     image_scores: dict = {}
     img_error = None
-    try:
-        import db_utils as _db
-        limit = min(3000, len(df) * 20)
-        clip_emb = None
-        if has_image:
-            clip_emb = image_embedding
-        elif has_vibe:
-            from image_embedder import clip_encode_text
-            clip_emb = clip_encode_text(vibe)
-        if clip_emb:
-            image_scores = _db.search_by_image_embedding(clip_emb, limit=limit)
-    except Exception as e:
-        img_error = str(e)
+    if has_image:
+        try:
+            import db_utils as _db
+            limit = min(3000, len(df) * 20)
+            image_scores = _db.search_by_image_embedding(image_embedding, limit=limit)
+        except Exception as e:
+            img_error = str(e)
     if img_error and not embed_error:
         embed_error = img_error
 

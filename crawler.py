@@ -133,6 +133,29 @@ class ProxyRotator:
         except Exception:
             return False
 
+    def _verify_for_olx(self, proxy_url: str) -> bool:
+        """Return True if the proxy is NOT blocked by OLX's anti-bot layer.
+
+        Fetches a stable search page and checks for the l-card listing-card
+        marker — present on every real OLX search results page (the same
+        marker collect_links() itself relies on), absent on a rate-limited
+        or bot-challenge response. Added after a real listing that returned
+        a clean HTTP 410 (expired) via a direct connection was separately
+        observed coming back "blocked" through the crawler's proxy path —
+        OLX was the only platform with no proxy health check at all.
+        """
+        from curl_cffi import requests as cffi_requests
+        try:
+            r = cffi_requests.get(
+                "https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/bucuresti/",
+                proxies={"https": proxy_url, "http": proxy_url},
+                impersonate="chrome120",
+                timeout=15,
+            )
+            return r.status_code == 200 and 'data-cy="l-card"' in r.text
+        except Exception:
+            return False
+
     def _verify_for_storia(self, proxy_url: str) -> bool:
         """Return True if the proxy is NOT blocked by Storia's Cloudflare.
 
@@ -194,6 +217,7 @@ class ProxyRotator:
 
         start_idx = self._load_index()
         n = len(self._proxies)
+        check_olx    = bool(check_platforms and "olx" in check_platforms)
         check_storia = bool(check_platforms and "storia" in check_platforms)
 
         for offset in range(n):
@@ -204,6 +228,11 @@ class ProxyRotator:
             if not self._verify(proxy):
                 print("dead — trying next")
                 continue
+            if check_olx:
+                print("connectivity OK … olx … ", end="", flush=True)
+                if not self._verify_for_olx(proxy):
+                    print("blocked by OLX — trying next")
+                    continue
             if check_storia:
                 print("connectivity OK … storia … ", end="", flush=True)
                 if not self._verify_for_storia(proxy):
