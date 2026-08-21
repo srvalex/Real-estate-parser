@@ -13,16 +13,20 @@ against a specific mutable real listing, not a property of this codebase.
 The actual invariant that test was guarding — a bot-challenge redirect
 must classify as blocked, not expired — is now covered deterministically,
 with no live network and no dependency on any real listing's current
-state, in tests/test_storia_redirect_classification.py (fetch-level) and
-tests/test_storia_detection.py (content-classification level). This file
-is kept narrow: a live smoke check against the one listing whose state is
-actually stable (a confirmed, long-archived expiry).
+state, in tests/scrapers/storia/test_storia_redirect_classification.py
+(fetch-level) and tests/scrapers/storia/test_storia_detection.py
+(content-classification level). This file is kept narrow: a live smoke
+check against the one listing whose state is actually stable (a
+confirmed, long-archived expiry).
 """
 import unittest
 import sys
-import os
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# repo_root/tests/scrapers/storia/test_storia_live.py -> repo_root is 3 levels up.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from scrapers.storia import StoriaScraper
 

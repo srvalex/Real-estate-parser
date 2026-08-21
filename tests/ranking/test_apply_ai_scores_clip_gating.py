@@ -15,15 +15,15 @@ test process with a generic top-level "utils" module name.
 """
 
 import importlib.util
-import os
-import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_UTILS_PATH = os.path.join(_REPO_ROOT, "streamlit_interface", "pipeline", "utils.py")
+# repo_root/tests/ranking/test_apply_ai_scores_clip_gating.py -> repo_root is 2 levels up.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_UTILS_PATH = _REPO_ROOT / "streamlit_interface" / "pipeline" / "utils.py"
 
 
 def _load_pipeline_utils():

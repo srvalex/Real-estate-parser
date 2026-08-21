@@ -50,7 +50,7 @@ class ApplyForSessionOlxGatingTests(unittest.TestCase):
     here must restore that (via patch.dict, which snapshots and restores the
     whole environment) — otherwise a fake proxy string leaks into every
     later test in the same process, including live-network tests that read
-    PROXY_URL (e.g. tests/test_storia_live.py), silently routing them
+    PROXY_URL (e.g. tests/scrapers/storia/test_storia_live.py), silently routing them
     through a nonexistent proxy and turning a real HTTP call into a
     connection failure. This bit us once already: discovering the whole
     suite failed a live Storia test that passed in isolation."""

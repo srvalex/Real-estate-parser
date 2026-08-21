@@ -7,7 +7,7 @@ looking at the page content. Storia's bot-protection can also redirect off
 that path when it blocks a request (not just when a listing is genuinely
 gone), so a bot-challenge page was silently stamped "expired" instead of
 "blocked". Confirmed against live Storia listings on 2026-08-22 (see
-tests/test_storia_live.py's now-stale CHECKED_URL, which expired for real
+tests/scrapers/storia/test_storia_live.py's now-stale CHECKED_URL, which expired for real
 between when that test was written and when it was run — a separate,
 inherent flakiness of asserting fixed outcomes against mutable real
 listings, which is exactly why this fix is covered here with synthetic
