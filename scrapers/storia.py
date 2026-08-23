@@ -33,6 +33,13 @@ class StoriaScraper(PlatformScraper):
 
     # ── URL building ──────────────────────────────────────────────────────────
 
+    # crawler.run_incremental_crawl's early-exit ("new listings always appear
+    # on page 1") depends on the search results actually being sorted
+    # newest-first. That was previously just assumed from Storia's default
+    # ordering rather than requested explicitly — by=LATEST&direction=DESC
+    # pins it, confirmed against the site's own sort-by-newest control.
+    _SORT_PARAMS = "by=LATEST&direction=DESC"
+
     def build_search_urls(self, selected_neighbourhoods, districts, max_price=0, per_neighbourhood=False, full_sectors=None, partial_by_sector=None):
         urls = set()
         full_sectors = set(full_sectors or [])
@@ -54,7 +61,7 @@ class StoriaScraper(PlatformScraper):
                 urls.add(
                     f"https://www.storia.ro/ro/rezultate/inchiriere/apartament"
                     f"/bucuresti/sectorul-{sector_num}/{slug}"
-                    f"?ownerTypeSingleSelect=ALL&limit=48"
+                    f"?ownerTypeSingleSelect=ALL&limit=48&{self._SORT_PARAMS}"
                 )
         else:
             for district_name, neighbourhoods in districts.items():
@@ -64,7 +71,7 @@ class StoriaScraper(PlatformScraper):
                     urls.add(
                         f"https://www.storia.ro/ro/rezultate/inchiriere/apartament"
                         f"/bucuresti/sectorul-{sector_num}"
-                        f"?ownerTypeSingleSelect=ALL&limit=48"
+                        f"?ownerTypeSingleSelect=ALL&limit=48&{self._SORT_PARAMS}"
                     )
                 elif district_name in partial_by_sector:
                     for n in partial_by_sector[district_name]:
@@ -72,7 +79,7 @@ class StoriaScraper(PlatformScraper):
                         urls.add(
                             f"https://www.storia.ro/ro/rezultate/inchiriere/apartament"
                             f"/bucuresti/sectorul-{sector_num}/{slug}"
-                            f"?ownerTypeSingleSelect=ALL&limit=48"
+                            f"?ownerTypeSingleSelect=ALL&limit=48&{self._SORT_PARAMS}"
                         )
 
         if max_price > 0:

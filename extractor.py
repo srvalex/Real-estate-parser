@@ -76,13 +76,27 @@ def _save_new_listings(new_results: list, conn: sqlite3.Connection) -> pd.DataFr
     if not new_results:
         return pd.DataFrame()
 
-    # Serialize image_urls (list[dict]) → JSON string for SQLite column storage.
-    # Preserve the original lists so Firestore receives native arrays.
+    # Serialize image_urls (list[dict]) and extras (dict, Storia/Imobiliare
+    # only) → JSON strings for SQLite column storage. Preserve the originals
+    # so Supabase/Firestore receive native arrays/objects (their JSONB
+    # columns accept dicts/lists directly; SQLite's sqlite3 driver cannot
+    # bind either type as a parameter at all and raises "Error binding
+    # parameter N: type 'dict' is not supported" — pandas.to_sql() then
+    # re-raises that as the unhelpfully generic DatabaseError("Execution
+    # failed"), which is what actually printed during real crawls, not a
+    # Supabase failure. Confirmed: every Storia listing with a non-empty
+    # `extras` dict failed this exact way on both the batch AND row-by-row
+    # SQLite insert (never on the Supabase upsert, which handles dicts
+    # fine) before this fix.
     original_images = {}
+    original_extras = {}
     for item in new_results:
         if "image_urls" in item and isinstance(item["image_urls"], list):
             original_images[item.get("url", "")] = item["image_urls"]
             item["image_urls"] = json.dumps(item["image_urls"], ensure_ascii=False)
+        if "extras" in item and isinstance(item["extras"], dict):
+            original_extras[item.get("url", "")] = item["extras"]
+            item["extras"] = json.dumps(item["extras"], ensure_ascii=False)
 
     # Generate text embeddings for live listings before saving to Supabase.
     model = _get_embed_model()
@@ -118,13 +132,16 @@ def _save_new_listings(new_results: list, conn: sqlite3.Connection) -> pd.DataFr
                 failed += 1
         print(f"💾 Row-by-row: {saved} saved, {failed} skipped.")
 
-    # Restore original image_urls lists for Firestore (native array support)
+    # Restore original image_urls lists / extras dicts for Supabase/Firestore
+    # (their JSONB columns accept native arrays/objects directly)
     try:
         firestore_records = df_new.where(pd.notnull(df_new), None).to_dict(orient="records")
         for rec in firestore_records:
             url = rec.get("url", "")
             if url in original_images:
                 rec["image_urls"] = original_images[url]
+            if url in original_extras:
+                rec["extras"] = original_extras[url]
         save_to_firestore(firestore_records)
     except Exception as e:
         print(f"⚠️ Firestore save failed: {e}")

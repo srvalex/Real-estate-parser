@@ -384,61 +384,83 @@ def run_full_crawl(
     empty or max_pages is reached. Skips URLs already in SQLite.
     Proxy is applied once before this function is called (session-level).
     """
+    import db_utils
+
+    proxy_display = None
+    _current_proxy = _http.get_proxy()
+    if _current_proxy:
+        proxy_display = _current_proxy.split("@")[-1]  # hide credentials
+    run_id = db_utils.start_crawl_run_log(
+        mode="full", platforms=platforms, max_price=(max_price or None),
+        max_pages=max_pages, proxy_display=proxy_display,
+    )
+
     full_sectors = list(districts.keys())
     total_new = 0
     scraped_this_run: set[str] = set()
+    log_status = "success"
+    error_message = None
 
-    for pid in platforms:
-        scraper = SCRAPERS[pid]
-        search_urls = scraper.build_search_urls(
-            selected_neighbourhoods=[],
-            districts=districts,
-            max_price=max_price,
-            full_sectors=full_sectors,
+    try:
+        for pid in platforms:
+            scraper = SCRAPERS[pid]
+            search_urls = scraper.build_search_urls(
+                selected_neighbourhoods=[],
+                districts=districts,
+                max_price=max_price,
+                full_sectors=full_sectors,
+            )
+
+            print(f"\n{'='*60}")
+            print(
+                f"[{scraper.display_name}] full crawl — "
+                f"{len(search_urls)} search URLs, up to {max_pages} pages each"
+            )
+
+            for search_url in search_urls:
+                url_new = 0
+                for page_num in range(1, max_pages + 1):
+                    links = _collect_page(scraper, search_url, page_num)
+                    if not links:
+                        print(f"  page {page_num}: empty → done with this URL")
+                        break
+
+                    known = _known_urls(conn, links)
+                    new_links = [
+                        l for l in links if l not in known and l not in scraped_this_run
+                    ]
+                    print(
+                        f"  page {page_num}: {len(links)} links, "
+                        f"{len(new_links)} new, {len(known)} cached"
+                    )
+
+                    if new_links:
+                        by_platform: dict[str, list[str]] = {}
+                        for url in new_links:
+                            opid = _owner(url)
+                            if opid != "unknown":
+                                by_platform.setdefault(opid, []).append(url)
+                            else:
+                                print(f"    [skip] no scraper owns: {url}")
+                        saved = _scrape_and_save(conn, by_platform)
+                        scraped_this_run.update(new_links)
+                        url_new += saved
+
+                    time.sleep(random.uniform(1.5, 3.0))
+
+                print(f"  → {url_new} new listings from this search URL")
+                total_new += url_new
+
+        print(f"\n✅ Full crawl done — {total_new} new listings saved.")
+        return total_new
+    except Exception as e:
+        log_status = "failed"
+        error_message = str(e)
+        raise
+    finally:
+        db_utils.finish_crawl_run_log(
+            run_id, listings_new=total_new, status=log_status, error_message=error_message,
         )
-
-        print(f"\n{'='*60}")
-        print(
-            f"[{scraper.display_name}] full crawl — "
-            f"{len(search_urls)} search URLs, up to {max_pages} pages each"
-        )
-
-        for search_url in search_urls:
-            url_new = 0
-            for page_num in range(1, max_pages + 1):
-                links = _collect_page(scraper, search_url, page_num)
-                if not links:
-                    print(f"  page {page_num}: empty → done with this URL")
-                    break
-
-                known = _known_urls(conn, links)
-                new_links = [
-                    l for l in links if l not in known and l not in scraped_this_run
-                ]
-                print(
-                    f"  page {page_num}: {len(links)} links, "
-                    f"{len(new_links)} new, {len(known)} cached"
-                )
-
-                if new_links:
-                    by_platform: dict[str, list[str]] = {}
-                    for url in new_links:
-                        opid = _owner(url)
-                        if opid != "unknown":
-                            by_platform.setdefault(opid, []).append(url)
-                        else:
-                            print(f"    [skip] no scraper owns: {url}")
-                    saved = _scrape_and_save(conn, by_platform)
-                    scraped_this_run.update(new_links)
-                    url_new += saved
-
-                time.sleep(random.uniform(1.5, 3.0))
-
-            print(f"  → {url_new} new listings from this search URL")
-            total_new += url_new
-
-    print(f"\n✅ Full crawl done — {total_new} new listings saved.")
-    return total_new
 
 
 def run_incremental_crawl(
@@ -455,65 +477,87 @@ def run_incremental_crawl(
     appear on page 1, so most runs finish in 1-3 pages per search URL.
     Proxy is applied once before this function is called (session-level).
     """
+    import db_utils
+
+    proxy_display = None
+    _current_proxy = _http.get_proxy()
+    if _current_proxy:
+        proxy_display = _current_proxy.split("@")[-1]  # hide credentials
+    run_id = db_utils.start_crawl_run_log(
+        mode="incremental", platforms=platforms, max_price=(max_price or None),
+        max_pages=max_pages, stop_threshold=stop_threshold, proxy_display=proxy_display,
+    )
+
     full_sectors = list(districts.keys())
     total_new = 0
     scraped_this_run: set[str] = set()
+    log_status = "success"
+    error_message = None
 
-    for pid in platforms:
-        scraper = SCRAPERS[pid]
-        search_urls = scraper.build_search_urls(
-            selected_neighbourhoods=[],
-            districts=districts,
-            max_price=max_price,
-            full_sectors=full_sectors,
+    try:
+        for pid in platforms:
+            scraper = SCRAPERS[pid]
+            search_urls = scraper.build_search_urls(
+                selected_neighbourhoods=[],
+                districts=districts,
+                max_price=max_price,
+                full_sectors=full_sectors,
+            )
+
+            print(f"\n{'='*60}")
+            print(
+                f"[{scraper.display_name}] incremental — "
+                f"{len(search_urls)} search URLs, "
+                f"max {max_pages} pages, stop at {stop_threshold:.0%} known"
+            )
+
+            for search_url in search_urls:
+                url_new = 0
+                for page_num in range(1, max_pages + 1):
+                    links = _collect_page(scraper, search_url, page_num)
+                    if not links:
+                        break
+
+                    known = _known_urls(conn, links)
+                    new_links = [
+                        l for l in links if l not in known and l not in scraped_this_run
+                    ]
+                    known_ratio = len(known) / len(links)
+                    print(
+                        f"  page {page_num}: {len(links)} links, "
+                        f"{len(new_links)} new ({known_ratio:.0%} known)"
+                    )
+
+                    if new_links:
+                        by_platform: dict[str, list[str]] = {}
+                        for url in new_links:
+                            opid = _owner(url)
+                            if opid != "unknown":
+                                by_platform.setdefault(opid, []).append(url)
+                            else:
+                                print(f"    [skip] no scraper owns: {url}")
+                        saved = _scrape_and_save(conn, by_platform)
+                        scraped_this_run.update(new_links)
+                        url_new += saved
+
+                    if known_ratio >= stop_threshold:
+                        print(f"  → early exit ({known_ratio:.0%} ≥ {stop_threshold:.0%})")
+                        break
+
+                    time.sleep(random.uniform(1.0, 2.5))
+
+                total_new += url_new
+
+        print(f"\n✅ Incremental crawl done — {total_new} new listings saved.")
+        return total_new
+    except Exception as e:
+        log_status = "failed"
+        error_message = str(e)
+        raise
+    finally:
+        db_utils.finish_crawl_run_log(
+            run_id, listings_new=total_new, status=log_status, error_message=error_message,
         )
-
-        print(f"\n{'='*60}")
-        print(
-            f"[{scraper.display_name}] incremental — "
-            f"{len(search_urls)} search URLs, "
-            f"max {max_pages} pages, stop at {stop_threshold:.0%} known"
-        )
-
-        for search_url in search_urls:
-            url_new = 0
-            for page_num in range(1, max_pages + 1):
-                links = _collect_page(scraper, search_url, page_num)
-                if not links:
-                    break
-
-                known = _known_urls(conn, links)
-                new_links = [
-                    l for l in links if l not in known and l not in scraped_this_run
-                ]
-                known_ratio = len(known) / len(links)
-                print(
-                    f"  page {page_num}: {len(links)} links, "
-                    f"{len(new_links)} new ({known_ratio:.0%} known)"
-                )
-
-                if new_links:
-                    by_platform: dict[str, list[str]] = {}
-                    for url in new_links:
-                        opid = _owner(url)
-                        if opid != "unknown":
-                            by_platform.setdefault(opid, []).append(url)
-                        else:
-                            print(f"    [skip] no scraper owns: {url}")
-                    saved = _scrape_and_save(conn, by_platform)
-                    scraped_this_run.update(new_links)
-                    url_new += saved
-
-                if known_ratio >= stop_threshold:
-                    print(f"  → early exit ({known_ratio:.0%} ≥ {stop_threshold:.0%})")
-                    break
-
-                time.sleep(random.uniform(1.0, 2.5))
-
-            total_new += url_new
-
-    print(f"\n✅ Incremental crawl done — {total_new} new listings saved.")
-    return total_new
 
 
 def run_text_backfill() -> None:
@@ -602,112 +646,130 @@ def run_availability_check(
     """
     import db_utils
 
-    print("\n[avail-check] Fetching listings to check…", flush=True)
-    all_listings = db_utils.get_listings_for_availability_check(limit=limit)
-    if not all_listings:
-        print("[avail-check] Nothing to check.", flush=True)
-        return
-
-    by_platform: dict[str, list[str]] = {}
-    for row in all_listings:
-        pid = row.get("platform_id", "")
-        url = row.get("url", "")
-        if pid and url:
-            by_platform.setdefault(pid, []).append(url)
-
-    print(
-        f"[avail-check] {len(all_listings)} listings across "
-        f"{list(by_platform.keys())}",
-        flush=True,
-    )
-
+    run_id = db_utils.start_availability_check_log(platforms=platforms)
     total_checked = 0
     total_expired = 0
     total_blocked = 0
-    pending: list[dict] = []
-    pending_rich: list[dict] = []
+    log_status = "success"
+    error_message = None
 
-    def _flush(force: bool = False):
-        nonlocal pending, pending_rich
-        if pending and (force or len(pending) >= 100):
-            db_utils.batch_update_availability(pending)
-            pending = []
-        if pending_rich and (force or len(pending_rich) >= 100):
-            db_utils.save_to_db(pending_rich)
-            pending_rich = []
+    try:
+        print("\n[avail-check] Fetching listings to check…", flush=True)
+        all_listings = db_utils.get_listings_for_availability_check(limit=limit)
+        if not all_listings:
+            print("[avail-check] Nothing to check.", flush=True)
+            return
 
-    for pid, urls in by_platform.items():
-        if platforms and pid not in platforms:
-            continue
-        scraper = SCRAPERS.get(pid)
-        if not scraper:
-            print(f"[avail-check] no scraper for '{pid}', skipping.", flush=True)
-            continue
+        by_platform: dict[str, list[str]] = {}
+        for row in all_listings:
+            pid = row.get("platform_id", "")
+            url = row.get("url", "")
+            if pid and url:
+                by_platform.setdefault(pid, []).append(url)
 
-        print(f"[avail-check] {pid}: {len(urls)} listings…", flush=True)
-
-        if pid == "olx":
-            for idx, url in enumerate(urls, 1):
-                result = scraper.scrape_listing_with_status(url)
-                status = result.get("status")
-                total_checked += 1
-                if status == "expired":
-                    pending.append({"url": url, "is_available": 0})
-                    total_expired += 1
-                elif status == "success":
-                    data = result["data"]
-                    data["is_available"] = 1
-                    pending_rich.append(data)
-                # blocked → leave is_available unchanged
-                _flush()
-                if idx % 100 == 0:
-                    print(
-                        f"  [avail-check] olx {idx}/{len(urls)} — "
-                        f"{total_expired} expired so far",
-                        flush=True,
-                    )
-                time.sleep(0.5)  # avoid hammering OLX
-        else:
-            # Storia / Imobiliare: scrape_batch already returns is_available per URL
-            BATCH = 5
-            for i in range(0, len(urls), BATCH):
-                chunk = urls[i : i + BATCH]
-                results = scraper.scrape_batch(chunk)
-                result_map = {r.get("url"): r for r in results if r.get("url")}
-                for url in chunk:
-                    entry = result_map.get(url)
-                    if entry is None:
-                        continue
-                    avail = entry.get("is_available")
-                    if avail is None:
-                        total_blocked += 1
-                        continue
-                    total_checked += 1
-                    if avail == 1 and entry.get("platform"):
-                        # Full scrape result (has title/price/etc, not just a
-                        # bare tombstone flip) -- persist all of it.
-                        pending_rich.append(entry)
-                    else:
-                        pending.append({"url": url, "is_available": avail})
-                    if avail == 0:
-                        total_expired += 1
-                _flush()
-                time.sleep(1.5)
-
-        _flush(force=True)
         print(
-            f"[avail-check] {pid}: done. "
-            f"{total_checked} definitive checks, {total_blocked} blocked, "
-            f"{total_expired} expired total.",
+            f"[avail-check] {len(all_listings)} listings across "
+            f"{list(by_platform.keys())}",
             flush=True,
         )
 
-    _flush(force=True)
-    print(
-        f"\n[avail-check] Finished: {total_checked} definitive checks, "
-        f"{total_blocked} blocked, {total_expired} newly marked expired.",
-        flush=True,
-    )
+        pending: list[dict] = []
+        pending_rich: list[dict] = []
+
+        def _flush(force: bool = False):
+            nonlocal pending, pending_rich
+            if pending and (force or len(pending) >= 100):
+                db_utils.batch_update_availability(pending)
+                pending = []
+            if pending_rich and (force or len(pending_rich) >= 100):
+                db_utils.save_to_db(pending_rich)
+                pending_rich = []
+
+        for pid, urls in by_platform.items():
+            if platforms and pid not in platforms:
+                continue
+            scraper = SCRAPERS.get(pid)
+            if not scraper:
+                print(f"[avail-check] no scraper for '{pid}', skipping.", flush=True)
+                continue
+
+            print(f"[avail-check] {pid}: {len(urls)} listings…", flush=True)
+
+            if pid == "olx":
+                for idx, url in enumerate(urls, 1):
+                    result = scraper.scrape_listing_with_status(url)
+                    status = result.get("status")
+                    total_checked += 1
+                    if status == "expired":
+                        pending.append({"url": url, "is_available": 0})
+                        total_expired += 1
+                    elif status == "success":
+                        data = result["data"]
+                        data["is_available"] = 1
+                        pending_rich.append(data)
+                    # blocked → leave is_available unchanged
+                    _flush()
+                    if idx % 100 == 0:
+                        print(
+                            f"  [avail-check] olx {idx}/{len(urls)} — "
+                            f"{total_expired} expired so far",
+                            flush=True,
+                        )
+                    time.sleep(0.5)  # avoid hammering OLX
+            else:
+                # Storia / Imobiliare: scrape_batch already returns is_available per URL
+                BATCH = 5
+                for i in range(0, len(urls), BATCH):
+                    chunk = urls[i : i + BATCH]
+                    results = scraper.scrape_batch(chunk)
+                    result_map = {r.get("url"): r for r in results if r.get("url")}
+                    for url in chunk:
+                        entry = result_map.get(url)
+                        if entry is None:
+                            continue
+                        avail = entry.get("is_available")
+                        if avail is None:
+                            total_blocked += 1
+                            continue
+                        total_checked += 1
+                        if avail == 1 and entry.get("platform"):
+                            # Full scrape result (has title/price/etc, not just a
+                            # bare tombstone flip) -- persist all of it.
+                            pending_rich.append(entry)
+                        else:
+                            pending.append({"url": url, "is_available": avail})
+                        if avail == 0:
+                            total_expired += 1
+                    _flush()
+                    time.sleep(1.5)
+
+            _flush(force=True)
+            print(
+                f"[avail-check] {pid}: done. "
+                f"{total_checked} definitive checks, {total_blocked} blocked, "
+                f"{total_expired} expired total.",
+                flush=True,
+            )
+
+        _flush(force=True)
+        print(
+            f"\n[avail-check] Finished: {total_checked} definitive checks, "
+            f"{total_blocked} blocked, {total_expired} newly marked expired.",
+            flush=True,
+        )
+    except Exception as e:
+        log_status = "failed"
+        error_message = str(e)
+        raise
+    finally:
+        db_utils.finish_availability_check_log(
+            run_id,
+            listings_checked=total_checked,
+            listings_expired=total_expired,
+            listings_blocked=total_blocked,
+            status=log_status,
+            error_message=error_message,
+        )
 
 
 def main():

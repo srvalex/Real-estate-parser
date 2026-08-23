@@ -19,6 +19,14 @@ if _PROJECT_ROOT not in sys.path:
 
 from rrf import rrf_fuse
 
+# get_ron_to_eur_rate / price_in_eur live in db_utils.py, not here -- that
+# module is the Streamlit-independent, foundational layer (also used by
+# crawler.py and, per MIGRATION_PLAN.md, the future API). Defining live-rate
+# fetching in this Streamlit-coupled file and having db_utils reach into it
+# would tie the crawler and the future API to a Streamlit dependency they
+# must never need.
+from db_utils import get_ron_to_eur_rate, price_in_eur
+
 _DATA_DIR = os.path.join(_HERE, "..")   # Streamlit Interface/
 
 @st.cache_data
@@ -51,10 +59,23 @@ def safe_str(val):
     return "" if pd.isna(val) else str(val).strip()
 
 def prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Strip unnamed columns and add numeric helper columns for price and rooms."""
+    """Strip unnamed columns and add numeric helper columns for price and rooms.
+
+    _price_num is EUR-normalised, not a raw copy of price_numeric — the
+    dataset has both EUR and RON listings (price_currency), and every
+    consumer of _price_num (apply_filters' max_price cutoff) treats it as
+    a EUR value. Comparing raw price_numeric against a EUR budget without
+    converting RON first silently excluded affordable RON listings whose
+    raw number just looked "too high" (e.g. 2000 RON ~= 392 EUR, but
+    2000 > a 500 EUR max_price cutoff) — the RON listings weren't flagged
+    as errors, they just vanished from results with no indication why.
+    """
     df = df.loc[:, ~df.columns.str.startswith("Unnamed")]
     if "price_numeric" in df.columns:
-        df["_price_num"] = pd.to_numeric(df["price_numeric"], errors="coerce")
+        currency = df["price_currency"] if "price_currency" in df.columns else pd.Series("EUR", index=df.index)
+        df["_price_num"] = [
+            price_in_eur(p, c) for p, c in zip(df["price_numeric"], currency)
+        ]
     else:
         price_col = "rent" if "rent" in df.columns else "price" if "price" in df.columns else None
         df["_price_num"] = df[price_col].apply(parse_price) if price_col else None
@@ -146,6 +167,20 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
     if not has_vibe and not has_image:
         return df, False, None
 
+    # Score every candidate in df (already filtered by district/price/rooms/
+    # type before this function runs) rather than hoping it survives some
+    # global top-K cutoff on the whole listings table. Without this, a
+    # niche-filtered search over a small district could see its actual best
+    # matches sit outside the global top-K on a large table and silently
+    # get no score at all (sorted last, no error shown). No size cap here —
+    # db_utils.search_by_text_vibe/search_by_image_embedding split a large
+    # candidate_urls list into bounded RPC batches internally
+    # (_RPC_CANDIDATE_CHUNK_SIZE), so scoping stays correct even when every
+    # sector is selected at once, instead of silently reverting to an
+    # unscoped global search past some threshold (see BUGS.md #7).
+    all_candidate_urls = list(df[url_col].dropna().unique())
+    scoped_urls = all_candidate_urls
+
     # ── Text search via pgvector (Supabase match_listings RPC) ───────────────
     text_scores: dict = {}
     if has_vibe:
@@ -155,7 +190,8 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
                 import db_utils
                 text_scores = db_utils.search_by_text_vibe(
                     q_embedding,
-                    limit=min(max(len(df) * 3, 200), 1000),
+                    limit=1000,
+                    candidate_urls=scoped_urls,
                 )
                 if not text_scores:
                     embed_error = "No pgvector matches — run scripts/backfill_embeddings.py to populate embeddings"
@@ -173,8 +209,9 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
     if has_image:
         try:
             import db_utils as _db
-            limit = min(3000, len(df) * 20)
-            image_scores = _db.search_by_image_embedding(image_embedding, limit=limit)
+            image_scores = _db.search_by_image_embedding(
+                image_embedding, limit=3000, candidate_urls=scoped_urls,
+            )
         except Exception as e:
             img_error = str(e)
     if img_error and not embed_error:
@@ -185,8 +222,7 @@ def apply_ai_scores(df: pd.DataFrame, vibe: str, server_url: str, url_col: str, 
         return df, False, embed_error
 
     # ── Reciprocal Rank Fusion ────────────────────────────────────────────────
-    all_urls = set(df[url_col].dropna())
-    final_scores = rrf_fuse(text_scores, image_scores, all_urls)
+    final_scores = rrf_fuse(text_scores, image_scores, all_candidate_urls)
 
     if not final_scores:
         return df, False, embed_error
@@ -219,6 +255,13 @@ def apply_price_fairness(df: pd.DataFrame) -> pd.DataFrame:
     - district or rooms is missing
     - fewer than 5 comparables exist in that bucket
     - price is within ±5% of the average (too close to call)
+
+    get_price_stats() buckets are EUR-only (it filters price_currency=EUR
+    before averaging), so a RON-priced row's raw price_numeric must be
+    converted to EUR before comparing — otherwise a normally-priced RON
+    listing (e.g. 4000 RON ~= 784 EUR) gets compared against a EUR average
+    (e.g. 850) as if it were 4000 EUR, producing a wildly wrong "+371% vs
+    avg" badge instead of the accurate "-8%".
     """
     stats = _cached_price_stats()
     df = df.copy()
@@ -231,9 +274,9 @@ def apply_price_fairness(df: pd.DataFrame) -> pd.DataFrame:
     for _, row in df.iterrows():
         district = str(row.get("district") or "").strip()
         rooms    = str(row.get("rooms") or "").strip()
-        price    = row.get("price_numeric")
+        price_eur = price_in_eur(row.get("price_numeric"), row.get("price_currency"))
 
-        if not district or not rooms or price is None or str(price) in ("", "nan"):
+        if not district or not rooms or price_eur is None:
             labels.append(None)
             continue
 
@@ -243,7 +286,7 @@ def apply_price_fairness(df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         try:
-            pct = (float(price) - bucket["avg"]) / bucket["avg"] * 100
+            pct = (price_eur - bucket["avg"]) / bucket["avg"] * 100
         except (TypeError, ZeroDivisionError):
             labels.append(None)
             continue

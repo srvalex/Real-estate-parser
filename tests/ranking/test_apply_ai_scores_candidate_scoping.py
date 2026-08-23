@@ -3,10 +3,14 @@ Tests for apply_ai_scores' candidate-set scoping (streamlit_interface/pipeline/u
 
 Companion fix to tests/db/test_db_utils_scoped_search.py: this covers the
 decision of *what* gets passed as candidate_urls — the caller's already
-district/price/rooms/type-filtered df, deduplicated, unless it's
-pathologically large (e.g. every sector selected at once), in which case
-it falls back to the old unscoped global top-K search rather than sending
-an enormous URL array to the RPC.
+district/price/rooms/type-filtered df, deduplicated. There is deliberately
+no size cap here (BUGS.md #7): a large candidate set (e.g. every sector
+selected at once) used to fall back to the old unscoped global top-K search,
+which could silently miss a niche-filtered search's actual best matches.
+db_utils.search_by_text_vibe/search_by_image_embedding now split a large
+candidate_urls list into bounded RPC batches internally instead
+(tests/db/test_db_utils_scoped_search.py covers that batching), so this
+module always passes the full filtered set through.
 """
 import importlib.util
 import unittest
@@ -55,10 +59,11 @@ class CandidateScopingTests(unittest.TestCase):
         called_kwargs = mock_text_search.call_args.kwargs
         self.assertEqual(sorted(called_kwargs["candidate_urls"]), ["https://a", "https://b"])
 
-    def test_oversized_candidate_set_falls_back_to_unscoped_search(self):
-        """Beyond the defensive cap, candidate_urls must be None (letting
-        the RPC's own global top-K path run) rather than sending a huge
-        URL array."""
+    def test_oversized_candidate_set_is_still_passed_through_in_full(self):
+        """A large candidate set (e.g. every sector selected at once) must
+        not fall back to an unscoped global search -- db_utils is
+        responsible for batching it into bounded RPC calls, not this
+        module for shrinking or dropping it."""
         huge_df = pd.DataFrame({"url": [f"https://listing-{i}" for i in range(2500)]})
 
         with patch.object(putils, "embed_query", return_value=[0.1] * 384), \
@@ -67,7 +72,7 @@ class CandidateScopingTests(unittest.TestCase):
             putils.apply_ai_scores(huge_df, vibe="apartament luminos", server_url=None, url_col="url")
 
         called_kwargs = mock_text_search.call_args.kwargs
-        self.assertIsNone(called_kwargs["candidate_urls"])
+        self.assertEqual(len(called_kwargs["candidate_urls"]), 2500)
 
     def test_image_search_also_receives_the_same_candidate_scoping(self):
         df = pd.DataFrame({"url": ["https://a", "https://b"]})

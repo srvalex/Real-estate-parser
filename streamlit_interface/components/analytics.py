@@ -70,11 +70,15 @@ def _load_data() -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce", utc=True)
 
-    # Normalise price
+    # Normalise price -- shares utils.get_ron_to_eur_rate() (rather than its
+    # own hardcoded rate) so the live BNR rate and its caching/fallback
+    # behaviour can't drift from apply_filters/apply_price_fairness, which
+    # do this same conversion for search results.
     if "price_numeric" in df.columns:
+        from utils import get_ron_to_eur_rate
         df["price_numeric"] = pd.to_numeric(df["price_numeric"], errors="coerce")
         ron_mask = df.get("price_currency", pd.Series("EUR")) == "RON"
-        df["price_eur_normalized"] = df["price_numeric"].where(~ron_mask, df["price_numeric"] / 5.1)
+        df["price_eur_normalized"] = df["price_numeric"].where(~ron_mask, df["price_numeric"] / get_ron_to_eur_rate())
 
     if "area_sqm" in df.columns:
         df["area_sqm"] = pd.to_numeric(df["area_sqm"], errors="coerce")

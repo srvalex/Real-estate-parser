@@ -193,7 +193,7 @@ def render_home(districts, proximity, server_url):
         all_districts = final_selection + proximity_selection
         with st.spinner("⚡ Se încarcă anunțurile..."):
             from db_utils import query_listings_by_district
-            records = query_listings_by_district(all_districts)
+            records = query_listings_by_district(all_districts, max_price_eur=max_price)
 
         if proximity_selection:
             st.toast(f"🔍 S-au adăugat {len(proximity_selection)} cartiere învecinate", icon="🔍")
