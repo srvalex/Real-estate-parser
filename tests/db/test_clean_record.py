@@ -139,18 +139,53 @@ class PropertyTypeInferenceTests(unittest.TestCase):
 
 class NonCanonicalColumnStrippingTests(unittest.TestCase):
     """The actual landmine this function has: fields not in
-    _CANONICAL_COLUMNS are silently dropped from an otherwise-surviving
-    row. These tests lock in that the row still survives, the unknown
-    field is gone from the output, and — the fix — it's now logged."""
+    _CANONICAL_COLUMNS used to be silently dropped from an otherwise-
+    surviving row. Fixed twice: first by logging the drop (so a genuine
+    gap like the property_type incident surfaces immediately), then by
+    folding the field into `extras` instead of discarding it outright
+    (found live 2026-08-23: Storia's `characteristics` array flattens onto
+    the raw item as top-level fields like building_floors_num,
+    building_material, deposit — none canonical, all being silently lost
+    on every single Storia listing — see BUGS.md #3c). These tests lock in
+    that the row still survives, the unknown field is gone from the
+    top-level output, it ends up inside `extras` instead of vanishing, and
+    it's still logged for visibility."""
 
-    def test_unknown_field_is_dropped_from_the_output(self):
+    def test_unknown_field_is_removed_from_the_top_level_output(self):
         result = db_utils._clean_record({
             "url": "https://x", "title": "Real title", "totally_made_up_field": "should vanish",
         })
         self.assertNotIn("totally_made_up_field", result)
         self.assertEqual(result["title"], "Real title")
 
-    def test_dropping_non_canonical_field_is_logged(self):
+    def test_unknown_field_is_folded_into_extras_instead_of_lost(self):
+        result = db_utils._clean_record({
+            "url": "https://x", "building_floors_num": "8", "deposit": "1 lună",
+        })
+        self.assertEqual(result["extras"]["building_floors_num"], "8")
+        self.assertEqual(result["extras"]["deposit"], "1 lună")
+
+    def test_folding_preserves_an_existing_extras_dict(self):
+        result = db_utils._clean_record({
+            "url": "https://x",
+            "extras": {"original_key": "original_value"},
+            "windows_type": "PVC",
+        })
+        self.assertEqual(result["extras"]["original_key"], "original_value")
+        self.assertEqual(result["extras"]["windows_type"], "PVC")
+
+    def test_existing_extras_value_wins_on_a_key_collision(self):
+        """If extras already has a value for a name that also appears as a
+        dropped top-level field, keep the existing extras value rather than
+        silently overwrite it with the flattened duplicate."""
+        result = db_utils._clean_record({
+            "url": "https://x",
+            "extras": {"deposit": "already set"},
+            "deposit": "flattened duplicate",
+        })
+        self.assertEqual(result["extras"]["deposit"], "already set")
+
+    def test_folding_non_canonical_field_is_logged(self):
         with patch("builtins.print") as mock_print:
             db_utils._clean_record({"url": "https://x", "made_up_field": "x"})
 

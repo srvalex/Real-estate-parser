@@ -16,22 +16,25 @@ edit that quietly changes one Streamlit-facing function back to
 get_client() would reintroduce the vulnerability, and these tests catch
 that at the function level, not just in the factory.
 """
+import re
 import unittest
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import db_utils
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_STREAMLIT_INTERFACE = _REPO_ROOT / "streamlit_interface"
 
 
 class ClientFactoryTests(unittest.TestCase):
     def setUp(self):
         db_utils._client = None
         db_utils._anon_client = None
-        db_utils._warned_anon_fallback = False
 
     def tearDown(self):
         db_utils._client = None
         db_utils._anon_client = None
-        db_utils._warned_anon_fallback = False
 
     def test_get_client_uses_service_role_key(self):
         with patch.object(db_utils, "SUPABASE_URL", "https://x.supabase.co"), \
@@ -50,22 +53,17 @@ class ClientFactoryTests(unittest.TestCase):
             db_utils.get_anon_client()
         mock_create.assert_called_once_with("https://x.supabase.co", "anon-key")
 
-    def test_get_anon_client_falls_back_to_service_role_key_with_warning(self):
-        """Fallback must exist (so nothing breaks before RLS is configured)
-        but must be loud about it — silent fallback would hide exactly the
-        misconfiguration this split exists to prevent."""
+    def test_get_anon_client_raises_when_anon_key_not_set(self):
+        """No more silent fallback to the service-role key (BUGS.md #8):
+        with RLS confirmed working, a missing anon key must fail loudly
+        instead of quietly handing out full read/write/delete."""
         with patch.object(db_utils, "SUPABASE_URL", "https://x.supabase.co"), \
              patch.object(db_utils, "SUPABASE_KEY", "service-role-key"), \
              patch.object(db_utils, "SUPABASE_ANON_KEY", ""), \
-             patch.object(db_utils, "create_client") as mock_create, \
-             patch("builtins.print") as mock_print:
-            mock_create.return_value = MagicMock()
-            db_utils.get_anon_client()
-        mock_create.assert_called_once_with("https://x.supabase.co", "service-role-key")
-        self.assertTrue(
-            any("SUPABASE_ANON_KEY not set" in str(call) for call in mock_print.call_args_list),
-            "Expected a warning about the missing anon key to be printed",
-        )
+             patch.object(db_utils, "create_client") as mock_create:
+            with self.assertRaises(RuntimeError):
+                db_utils.get_anon_client()
+        mock_create.assert_not_called()
 
     def test_get_client_and_get_anon_client_are_independent_singletons(self):
         with patch.object(db_utils, "SUPABASE_URL", "https://x.supabase.co"), \
@@ -228,6 +226,34 @@ class WriteFunctionsUseServiceRoleClientTests(unittest.TestCase):
 
         self.mock_service.assert_called()
         self.mock_anon.assert_not_called()
+
+
+class StreamlitNeverUsesServiceRoleClientTests(unittest.TestCase):
+    """BUGS.md #8's other half: it's not enough for db_utils's own functions
+    to route correctly (ReadFunctionsUseAnonClientTests above) — nothing
+    stops a future streamlit_interface/ change from importing get_client()
+    directly and bypassing that boundary entirely. This scans every source
+    file under streamlit_interface/ for a literal get_client( call so that
+    regression fails loudly here instead of shipping to the public surface
+    silently."""
+
+    _GET_CLIENT_CALL = re.compile(r"(?<!\w)get_client\s*\(")
+
+    def test_no_streamlit_source_file_calls_get_client(self):
+        offenders = []
+        for path in _STREAMLIT_INTERFACE.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                if self._GET_CLIENT_CALL.search(line):
+                    offenders.append(f"{path.relative_to(_REPO_ROOT)}:{lineno}: {line.strip()}")
+
+        self.assertEqual(
+            offenders, [],
+            "streamlit_interface/ must never call the service-role get_client() "
+            "directly -- use get_anon_client() instead:\n" + "\n".join(offenders),
+        )
 
 
 if __name__ == "__main__":

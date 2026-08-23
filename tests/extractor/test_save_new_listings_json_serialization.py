@@ -16,6 +16,13 @@ this fix.
 
 Fix: extras gets the same stringify-for-SQLite / restore-native-for-Supabase
 treatment image_urls already had.
+
+Second fix (found auditing crawler.py for unhandled failure paths): that
+stringify step itself had no error handling — a single unexpected
+non-JSON-serializable value anywhere in one item's image_urls/extras raised
+uncaught, crashing the whole batch's processing before any item was
+written, not just the offending one. Each item's serialization is now
+isolated (see test_non_serializable_field_on_one_item_does_not_lose_the_rest_of_the_batch).
 """
 import sqlite3
 import unittest
@@ -56,6 +63,44 @@ class SaveNewListingsJsonSerializationTests(unittest.TestCase):
         saved_records = mock_save.call_args.args[0]
         self.assertEqual(saved_records[0]["extras"], {"id": 123, "nested": {"a": 1}})
         self.assertEqual(saved_records[0]["image_urls"], [{"thumbnail": "https://img/1.jpg"}])
+
+    def test_non_serializable_field_on_one_item_does_not_lose_the_rest_of_the_batch(self):
+        """A json.dumps failure for one item's image_urls/extras used to
+        raise uncaught in the plain per-item loop, crashing this whole call
+        before it ever reached the (already-safe, retry-then-skip)
+        SQLite/Supabase write paths below -- one bad record could silently
+        take every other good record in the same batch down with it. Now
+        it's caught and just that field is left unconverted for the bad
+        item; every other item in the batch is unaffected."""
+        bad_item = {
+            "url": "https://www.storia.ro/ro/oferta/bad-1",
+            "platform_id": "storia",
+            "title": "Bad listing",
+            "is_available": 1,
+            "extras": {"unserializable": {1, 2, 3}},  # a set -> json.dumps raises TypeError
+        }
+        good_item = {
+            "url": "https://www.storia.ro/ro/oferta/good-1",
+            "platform_id": "storia",
+            "title": "Good listing",
+            "is_available": 1,
+            "extras": {"fine": "value"},
+        }
+        conn = _fresh_conn()
+
+        with patch.object(extractor, "_get_embed_model", return_value=None), \
+             patch.object(extractor, "save_to_firestore") as mock_save:
+            df = extractor._save_new_listings([bad_item, good_item], conn)
+
+        self.assertEqual(len(df), 2, "both items must survive the call, not just the good one")
+        row = conn.execute(
+            "SELECT url FROM listings WHERE url = ?", (good_item["url"],)
+        ).fetchone()
+        self.assertIsNotNone(row, "the good item in the same batch must still be saved")
+
+        mock_save.assert_called_once()
+        saved_urls = {r["url"] for r in mock_save.call_args.args[0]}
+        self.assertIn(good_item["url"], saved_urls)
 
     def test_item_without_extras_or_image_urls_is_unaffected(self):
         item = {
