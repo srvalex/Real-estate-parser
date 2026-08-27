@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import clsx from "clsx";
@@ -14,15 +14,14 @@ import { ListingCard } from "@/components/results/ListingCard";
 import { SkeletonCard } from "@/components/results/SkeletonCard";
 import { EmptyState } from "@/components/results/EmptyState";
 import { PartialFailureBanner } from "@/components/results/PartialFailureBanner";
-import { ALL_LISTINGS } from "@/lib/mockData";
 import { getLocations } from "@/lib/locations";
 import { expandWithProximity } from "@/lib/zones";
-import { extractVibeFilters, isExcludedByDescription } from "@/lib/nlpFilters";
-import { applyHardFilters, scoreListings } from "@/lib/matching";
-import type { HardFilters, Platform, ScoredListing, SourceState, VibeFilters } from "@/lib/types";
+import { extractVibeFilters } from "@/lib/nlpFilters";
+import { matchedVibeFilters } from "@/lib/matching";
+import { searchListings } from "@/lib/api";
+import type { HardFilters, ScoredListing, VibeFilters } from "@/lib/types";
 
 const LOCATIONS = getLocations();
-const PLATFORMS: Platform[] = ["OLX", "Storia", "Imobiliare"];
 
 const DEFAULT_HARD_FILTERS: HardFilters = {
   maxPrice: 0,
@@ -48,8 +47,8 @@ export function SearchExperience() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("idle");
   const [pipelineStage, setPipelineStage] = useState<PipelineStage>("reading");
-  const [sources, setSources] = useState<SourceState[]>(PLATFORMS.map((p) => ({ platform: p, status: "pending" })));
-  const [failedPlatform, setFailedPlatform] = useState<Platform | null>(null);
+  const [embedError, setEmbedError] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const [results, setResults] = useState<ScoredListing[]>([]);
   const [vibeFiltersUsed, setVibeFiltersUsed] = useState<VibeFilters>({});
@@ -57,13 +56,8 @@ export function SearchExperience() {
   const [boostDistricts, setBoostDistricts] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortMode>("newest");
 
-  const searchCountRef = useRef(0);
   const liveVibeFilters = useMemo(() => extractVibeFilters(vibe), [vibe]);
   const proximityExtra = useMemo(() => (zones.length ? expandWithProximity(zones) : []), [zones]);
-  const effectiveZones = useMemo(
-    () => new Set([...zones, ...(includeProximity ? proximityExtra : [])]),
-    [zones, includeProximity, proximityExtra]
-  );
 
   async function handleSearch() {
     if (zones.length === 0) {
@@ -71,46 +65,39 @@ export function SearchExperience() {
       return;
     }
     setZoneError(null);
+    setSearchError(null);
     setHiddenUrls(new Set());
     setBoostDistricts(new Set());
 
     setStage("pipeline");
     setPipelineStage("reading");
-    setSources(PLATFORMS.map((p) => ({ platform: p, status: "pending" })));
-    await wait(400);
-
-    searchCountRef.current += 1;
-    const isSlowSearch = searchCountRef.current % 3 === 0;
-    const slowPlatform: Platform = "Storia";
-
+    await wait(200);
     setPipelineStage("searching");
-    setSources(PLATFORMS.map((p) => ({ platform: p, status: "loading" })));
-    for (const p of PLATFORMS) {
-      await wait(260);
-      setSources((prev) =>
-        prev.map((s) => (s.platform === p ? { ...s, status: isSlowSearch && p === slowPlatform ? "slow" : "done" } : s))
-      );
+
+    const vibeFilters = extractVibeFilters(vibe);
+
+    try {
+      const data = await searchListings({
+        zones,
+        nearbyZones: includeProximity ? proximityExtra : [],
+        hardFilters,
+        vibe,
+      });
+
+      const scored: ScoredListing[] = data.results.map((listing) => ({
+        ...listing,
+        matchedFilters: matchedVibeFilters(listing, vibeFilters),
+      }));
+
+      setResults(scored);
+      setVibeFiltersUsed(vibeFilters);
+      setEmbedError(data.embed_error);
+      setSort(data.embedding_sorted ? "relevance" : "newest");
+    } catch (e) {
+      setResults([]);
+      setSearchError(e instanceof Error ? e.message : "Căutarea a eșuat.");
     }
 
-    setPipelineStage("ranking");
-    await wait(450);
-
-    // ── "Query the DB" then apply hard + soft filters, same order as the Python pipeline ──
-    const vibeFilters = extractVibeFilters(vibe);
-    const zoneMatches = ALL_LISTINGS.filter((l) => l.is_available === 1 && effectiveZones.has(l.district));
-    const hardFiltered = applyHardFilters(zoneMatches, hardFilters);
-    const descriptionFiltered = hardFiltered.filter(
-      (l) => isExcludedByDescription(l.description, vibeFilters).length === 0
-    );
-    const sourceFiltered = isSlowSearch
-      ? descriptionFiltered.filter((l) => l.platform !== slowPlatform)
-      : descriptionFiltered;
-    const scored = scoreListings(sourceFiltered, vibe, vibeFilters, new Set(includeProximity ? proximityExtra : []));
-
-    setResults(scored);
-    setVibeFiltersUsed(vibeFilters);
-    setFailedPlatform(isSlowSearch ? slowPlatform : null);
-    setSort(vibe.trim() ? "relevance" : "newest");
     setStage("results");
   }
 
@@ -158,7 +145,7 @@ export function SearchExperience() {
   }, [hardFilters]);
 
   const emptySuggestion = useMemo(() => {
-    if (displayList.length > 0) return null;
+    if (displayList.length > 0 || searchError) return null;
     if (hardFilters.maxPrice > 0) {
       return {
         message: `Niciun anunț sub ${hardFilters.maxPrice} €. Încearcă să ridici pragul de preț.`,
@@ -185,7 +172,7 @@ export function SearchExperience() {
       actionLabel: "Include cartiere vecine",
       onRelax: () => setIncludeProximity(true),
     };
-  }, [displayList.length, hardFilters, zones.length]);
+  }, [displayList.length, hardFilters, zones.length, searchError]);
 
   return (
     <MotionConfig reducedMotion="user">
@@ -258,7 +245,7 @@ export function SearchExperience() {
 
               {stage !== "idle" && (
                 <div>
-                  <StatusStepper stage={pipelineStage} sources={sources} />
+                  <StatusStepper stage={pipelineStage} />
                   {pipelineStage !== "reading" && (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       {Array.from({ length: 4 }).map((_, i) => (
@@ -290,7 +277,8 @@ export function SearchExperience() {
             />
 
             <div className="mx-auto max-w-6xl space-y-4 px-4 py-5">
-              {failedPlatform && <PartialFailureBanner platform={failedPlatform} />}
+              {searchError && <PartialFailureBanner message={searchError} />}
+              {embedError && !searchError && <PartialFailureBanner message={embedError} />}
 
               {displayList.length === 0 ? (
                 <EmptyState suggestion={emptySuggestion} />

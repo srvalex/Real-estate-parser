@@ -1,18 +1,16 @@
 "use client";
 
-import { Check, FileSearch, Loader2, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { Check, Loader2, SlidersHorizontal } from "lucide-react";
 import clsx from "clsx";
-import type { SourceState } from "@/lib/types";
 
-export type PipelineStage = "reading" | "searching" | "ranking";
+export type PipelineStage = "reading" | "searching";
 
-const STAGES: { key: PipelineStage; label: string; icon: typeof FileSearch }[] = [
-  { key: "reading", label: "Citim promptul tău", icon: FileSearch },
-  { key: "searching", label: "Căutăm în surse", icon: Loader2 },
-  { key: "ranking", label: "Ordonăm după potrivire", icon: SlidersHorizontal },
+const STAGES: { key: PipelineStage; label: string; icon: typeof SlidersHorizontal }[] = [
+  { key: "reading", label: "Pregătim căutarea", icon: SlidersHorizontal },
+  { key: "searching", label: "Interogăm baza de date și ordonăm după potrivire", icon: Loader2 },
 ];
 
-export function StatusStepper({ stage, sources }: { stage: PipelineStage; sources: SourceState[] }) {
+export function StatusStepper({ stage }: { stage: PipelineStage }) {
   const activeIndex = STAGES.findIndex((s) => s.key === stage);
 
   return (
@@ -52,28 +50,13 @@ export function StatusStepper({ stage, sources }: { stage: PipelineStage; source
                   )}
                 />
               </div>
-              <span className={clsx("mt-2 text-xs", isActive ? "font-medium text-ink" : "text-concrete")}>
+              <span className={clsx("mt-2 max-w-[10rem] text-xs", isActive ? "font-medium text-ink" : "text-concrete")}>
                 {s.label}
               </span>
             </li>
           );
         })}
       </ol>
-
-      {stage === "searching" && (
-        <ul className="mt-6 flex justify-center gap-4 font-mono text-xs text-concrete">
-          {sources.map((s) => (
-            <li key={s.platform} className="flex items-center gap-1.5">
-              {s.status === "done" && <Check className="h-3.5 w-3.5 text-pine" />}
-              {s.status === "slow" && <TriangleAlert className="h-3.5 w-3.5 text-gold" />}
-              {(s.status === "loading" || s.status === "pending") && (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-brick" />
-              )}
-              {s.platform}
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }

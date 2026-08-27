@@ -25,7 +25,7 @@ export interface Listing {
   sector: string;
   location_full: string;
   rooms: RoomCount;
-  area_sqm: number;
+  area_sqm: number | null;
   floor: number;
   total_floors: number;
   year_built: number;
@@ -81,11 +81,4 @@ export interface ScoredListing extends Listing {
   priceFairnessPct: number | null; // negative = under district/room average (good)
   matchedFilters: VibeFilterKey[]; // which vibe filters this listing satisfies
   isNearbyZone: boolean;
-}
-
-export type SourceStatus = "pending" | "loading" | "done" | "slow";
-
-export interface SourceState {
-  platform: Platform;
-  status: SourceStatus;
 }

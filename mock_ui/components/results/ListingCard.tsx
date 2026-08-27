@@ -75,9 +75,11 @@ export function ListingCard({
           <span className="inline-flex items-center gap-1">
             <BedDouble className="h-3.5 w-3.5" /> {listing.rooms} camere
           </span>
-          <span className="inline-flex items-center gap-1">
-            <Ruler className="h-3.5 w-3.5" /> {listing.area_sqm} m²
-          </span>
+          {listing.area_sqm !== null && (
+            <span className="inline-flex items-center gap-1">
+              <Ruler className="h-3.5 w-3.5" /> {listing.area_sqm} m²
+            </span>
+          )}
           <span className="inline-flex items-center gap-1">
             <MapPin className="h-3.5 w-3.5" /> {listing.district}
           </span>
