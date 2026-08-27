@@ -1,0 +1,298 @@
+{
+    "13 Septembrie": [
+        "Cotroceni",
+        "Drumul Taberei",
+        "Ghencea",
+        "Rahova"
+    ],
+    "Andronache": [
+        "Colentina"
+    ],
+    "Aviatiei": [
+        "Aviatorilor",
+        "Baneasa",
+        "Floreasca",
+        "Pipera"
+    ],
+    "Aviatorilor": [
+        "Aviatiei",
+        "Baneasa",
+        "Dorobanti",
+        "Floreasca",
+        "Primaverii",
+        "Victoriei"
+    ],
+    "Balta Alba": [
+        "Titan"
+    ],
+    "Baneasa": [
+        "Aviatiei",
+        "Aviatorilor",
+        "Bucurestii Noi",
+        "Damaroaia",
+        "Pajura",
+        "Pipera",
+        "Primaverii"
+    ],
+    "Berceni": [
+        "Giurgiului",
+        "Tineretului"
+    ],
+    "Bucurestii Noi": [
+        "Baneasa",
+        "Chitila",
+        "Damaroaia",
+        "Grivita",
+        "Pajura"
+    ],
+    "Centrul Civic": [
+        "Mosilor",
+        "Unirii",
+        "Universitate",
+        "Vitan"
+    ],
+    "Chiajna": [
+        "Militari"
+    ],
+    "Chitila": [
+        "Bucurestii Noi"
+    ],
+    "Colentina": [
+        "Andronache",
+        "Fundeni",
+        "Obor",
+        "Pantelimon",
+        "Tei"
+    ],
+    "Cotroceni": [
+        "13 Septembrie",
+        "Eroilor",
+        "Gara de Nord",
+        "Grozavesti",
+        "Militari"
+    ],
+    "Crangasi": [
+        "Drumul Taberei",
+        "Giulesti",
+        "Grivita",
+        "Grozavesti",
+        "Militari"
+    ],
+    "Damaroaia": [
+        "Baneasa",
+        "Bucurestii Noi"
+    ],
+    "Dorobanti": [
+        "Aviatorilor",
+        "Floreasca",
+        "Piata Romana",
+        "Primaverii",
+        "Stefan cel Mare",
+        "Victoriei"
+    ],
+    "Dristor": [
+        "Dudesti",
+        "Muncii",
+        "Timpuri Noi",
+        "Titan",
+        "Vitan"
+    ],
+    "Drumul Taberei": [
+        "13 Septembrie",
+        "Crangasi",
+        "Ghencea",
+        "Militari"
+    ],
+    "Dudesti": [
+        "Dristor"
+    ],
+    "Eroilor": [
+        "Cotroceni"
+    ],
+    "Ferentari": [
+        "Giurgiului",
+        "Rahova"
+    ],
+    "Floreasca": [
+        "Aviatiei",
+        "Aviatorilor",
+        "Dorobanti",
+        "Primaverii",
+        "Stefan cel Mare",
+        "Tei"
+    ],
+    "Fundeni": [
+        "Colentina",
+        "Pantelimon"
+    ],
+    "Gara de Nord": [
+        "Cotroceni",
+        "Victoriei"
+    ],
+    "Ghencea": [
+        "13 Septembrie",
+        "Drumul Taberei",
+        "Militari",
+        "Rahova"
+    ],
+    "Giurgiului": [
+        "Berceni",
+        "Ferentari",
+        "Oltenitei",
+        "Rahova"
+    ],
+    "Giulesti": [
+        "Crangasi",
+        "Grivita",
+        "Militari"
+    ],
+    "Grivita": [
+        "Bucurestii Noi",
+        "Crangasi",
+        "Giulesti",
+        "Victoriei"
+    ],
+    "Grozavesti": [
+        "Cotroceni",
+        "Crangasi"
+    ],
+    "Iancului": [
+        "Mosilor",
+        "Muncii",
+        "Obor",
+        "Pantelimon",
+        "Vatra Luminoasa"
+    ],
+    "Militari": [
+        "Chiajna",
+        "Cotroceni",
+        "Crangasi",
+        "Drumul Taberei",
+        "Ghencea",
+        "Giulesti"
+    ],
+    "Mosilor": [
+        "Centrul Civic",
+        "Iancului",
+        "Obor",
+        "Piata Romana",
+        "Stefan cel Mare",
+        "Universitate"
+    ],
+    "Muncii": [
+        "Dristor",
+        "Iancului"
+    ],
+    "Obor": [
+        "Colentina",
+        "Iancului",
+        "Mosilor",
+        "Stefan cel Mare",
+        "Tei"
+    ],
+    "Oltenitei": [
+        "Giurgiului"
+    ],
+    "Pajura": [
+        "Baneasa",
+        "Bucurestii Noi"
+    ],
+    "Pantelimon": [
+        "Colentina",
+        "Fundeni",
+        "Iancului",
+        "Titan"
+    ],
+    "Piata Romana": [
+        "Dorobanti",
+        "Mosilor",
+        "Universitate",
+        "Victoriei"
+    ],
+    "Pipera": [
+        "Aviatiei",
+        "Baneasa",
+        "Voluntari"
+    ],
+    "Primaverii": [
+        "Aviatorilor",
+        "Baneasa",
+        "Dorobanti",
+        "Floreasca"
+    ],
+    "Rahova": [
+        "13 Septembrie",
+        "Ferentari",
+        "Ghencea",
+        "Giurgiului"
+    ],
+    "Stefan cel Mare": [
+        "Dorobanti",
+        "Floreasca",
+        "Mosilor",
+        "Obor",
+        "Tei"
+    ],
+    "Tei": [
+        "Colentina",
+        "Floreasca",
+        "Obor",
+        "Stefan cel Mare"
+    ],
+    "Timpuri Noi": [
+        "Dristor",
+        "Tineretului",
+        "Unirii",
+        "Vitan"
+    ],
+    "Tineretului": [
+        "Berceni",
+        "Timpuri Noi",
+        "Unirii",
+        "Vacaresti"
+    ],
+    "Titan": [
+        "Balta Alba",
+        "Dristor",
+        "Pantelimon",
+        "Vitan"
+    ],
+    "Unirii": [
+        "Centrul Civic",
+        "Timpuri Noi",
+        "Tineretului",
+        "Universitate",
+        "Vitan"
+    ],
+    "Universitate": [
+        "Centrul Civic",
+        "Mosilor",
+        "Piata Romana",
+        "Unirii"
+    ],
+    "Vacaresti": [
+        "Tineretului",
+        "Vitan"
+    ],
+    "Vatra Luminoasa": [
+        "Iancului"
+    ],
+    "Victoriei": [
+        "Aviatorilor",
+        "Dorobanti",
+        "Gara de Nord",
+        "Grivita",
+        "Piata Romana"
+    ],
+    "Vitan": [
+        "Centrul Civic",
+        "Dristor",
+        "Timpuri Noi",
+        "Titan",
+        "Unirii",
+        "Vacaresti"
+    ],
+    "Voluntari": [
+        "Pipera"
+    ]
+}
