@@ -88,15 +88,35 @@ def _save_new_listings(new_results: list, conn: sqlite3.Connection) -> pd.DataFr
     # `extras` dict failed this exact way on both the batch AND row-by-row
     # SQLite insert (never on the Supabase upsert, which handles dicts
     # fine) before this fix.
+    # Each item's serialization is isolated: before this, a single
+    # unexpected non-JSON-serializable value anywhere in one item's
+    # image_urls/extras raised uncaught here, crashing this loop before it
+    # even reached the (already-safe, retry-then-skip) SQLite/Supabase write
+    # paths below -- one bad record could silently take every other good
+    # record in the same batch down with it. Now a bad field is just left
+    # unconverted for that one item (it'll fail to bind at the SQLite/
+    # Supabase layer instead, where a single bad row is already skipped
+    # without affecting the rest of the batch) and every other item is
+    # unaffected.
     original_images = {}
     original_extras = {}
     for item in new_results:
         if "image_urls" in item and isinstance(item["image_urls"], list):
-            original_images[item.get("url", "")] = item["image_urls"]
-            item["image_urls"] = json.dumps(item["image_urls"], ensure_ascii=False)
+            try:
+                serialized = json.dumps(item["image_urls"], ensure_ascii=False)
+            except (TypeError, ValueError) as e:
+                print(f"  [skip-serialize] image_urls for {item.get('url', '?')}: {e}")
+            else:
+                original_images[item.get("url", "")] = item["image_urls"]
+                item["image_urls"] = serialized
         if "extras" in item and isinstance(item["extras"], dict):
-            original_extras[item.get("url", "")] = item["extras"]
-            item["extras"] = json.dumps(item["extras"], ensure_ascii=False)
+            try:
+                serialized = json.dumps(item["extras"], ensure_ascii=False)
+            except (TypeError, ValueError) as e:
+                print(f"  [skip-serialize] extras for {item.get('url', '?')}: {e}")
+            else:
+                original_extras[item.get("url", "")] = item["extras"]
+                item["extras"] = serialized
 
     # Generate text embeddings for live listings before saving to Supabase.
     model = _get_embed_model()

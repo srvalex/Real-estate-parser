@@ -24,11 +24,26 @@
 #   python3 -m venv venv
 #   source venv/bin/activate        # Windows: venv\Scripts\activate
 #   pip install -r requirements-dev.txt
-#   python -m unittest discover -s tests -v
+#   python -m unittest discover -s tests -t . -v
+#
+# tests/ is organized into per-subsystem suites (tests/scrapers/<platform>/,
+# tests/db/, tests/ranking/, tests/crawler/) mirroring the codebase's own
+# module layout. Run one suite on its own the same way, e.g.:
+#   python -m unittest discover -s tests/db -t .
+# The `-t .` (top-level-dir = repo root) is required, not optional: without
+# it, unittest computes module names relative to the start-dir instead of
+# the repo root, so e.g. tests/scrapers/... would try to import as a
+# top-level `scrapers` module and collide with the real scrapers/ package.
+# `python -m pytest tests/` also works and doesn't need the equivalent flag.
 # ============================================================================
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest
+httpx
+
+# ── API (MIGRATION_PLAN.md Phase 1/3 — api/main.py) ───────────────────────────
+fastapi
+uvicorn[standard]
 
 # ── Web / scraping ────────────────────────────────────────────────────────────
 playwright

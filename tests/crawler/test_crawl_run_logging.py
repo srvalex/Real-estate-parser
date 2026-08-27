@@ -17,6 +17,17 @@ status='partial_failure' and every failed platform named in error_message,
 rather than raising and discarding whatever the working platforms found.
 If EVERY platform in the run failed, that's still a full failure (raise,
 status='failed') — there's nothing partial about it.
+
+Outage detection (BUGS.md #9c): Imobiliare was fully blocked in production
+for ~7 weeks with crawl_run_logs showing status='success' the entire time,
+because a 403'd search page and a genuinely-empty one are both just
+"0 links found" to the crawl loop. Fixed by tracking, per platform, whether
+EVERY search URL came back completely empty on page 1 — routine for "0 new"
+on a real page, not routine at all across every one of Bucharest's broad
+sector-wide searches. When that happens the run now finishes with
+status='success_with_warnings' (or folded into 'partial_failure' if some
+platform also raised) naming the affected platform, instead of a plain,
+indistinguishable 'success'.
 """
 import unittest
 from unittest.mock import patch, MagicMock
@@ -125,6 +136,49 @@ class RunFullCrawlLoggingTests(unittest.TestCase):
         self.assertIn("olx", finish_kwargs["error_message"])
         self.assertIn("boom", finish_kwargs["error_message"])
 
+    def test_platform_with_empty_page_one_on_every_search_url_gets_flagged(self):
+        """BUGS.md #9c: this is Imobiliare's exact ~7-week outage signature
+        -- every search URL's page 1 comes back empty (a 403 handled the
+        same as a genuinely empty page), never a single exception, so the
+        per-platform isolation above wouldn't catch it. status must reflect
+        this instead of reading as a plain, indistinguishable 'success'."""
+        with patch("db_utils.start_crawl_run_log", return_value=7) as mock_start, \
+             patch("db_utils.finish_crawl_run_log") as mock_finish, \
+             patch.object(crawler._http, "get_proxy", return_value=None), \
+             patch("crawler._collect_page", return_value=[]):
+
+            result = crawler.run_full_crawl(
+                conn=MagicMock(), platforms=["imobiliare"],
+                districts={"Sector 1": ["A"], "Sector 2": ["B"]},
+            )
+
+        self.assertEqual(result, 0)
+        finish_kwargs = mock_finish.call_args.kwargs
+        self.assertEqual(finish_kwargs["status"], "success_with_warnings")
+        self.assertIn("imobiliare", finish_kwargs["error_message"])
+
+    def test_real_content_with_zero_new_listings_is_not_flagged_as_an_outage(self):
+        """The routine case -- a page that loads fine but has nothing new
+        on it -- must stay a plain 'success', not get confused with the
+        empty-page-1 outage signature above."""
+        def fake_collect_page(scraper, search_url, page_num):
+            return ["https://www.storia.ro/a", "https://www.storia.ro/b"] if page_num == 1 else []
+
+        with patch("db_utils.start_crawl_run_log", return_value=8) as mock_start, \
+             patch("db_utils.finish_crawl_run_log") as mock_finish, \
+             patch.object(crawler._http, "get_proxy", return_value=None), \
+             patch("crawler._collect_page", side_effect=fake_collect_page), \
+             patch("crawler._known_urls", side_effect=lambda conn, links: set(links)):
+
+            crawler.run_full_crawl(
+                conn=MagicMock(), platforms=["storia"],
+                districts={"Sector 1": ["A"]},
+            )
+
+        finish_kwargs = mock_finish.call_args.kwargs
+        self.assertEqual(finish_kwargs["status"], "success")
+        self.assertIsNone(finish_kwargs["error_message"])
+
 
 class RunIncrementalCrawlLoggingTests(unittest.TestCase):
     def test_success_starts_and_finishes_the_log_with_stop_threshold(self):
@@ -187,6 +241,41 @@ class RunIncrementalCrawlLoggingTests(unittest.TestCase):
         self.assertEqual(finish_kwargs["status"], "partial_failure")
         self.assertIn("olx", finish_kwargs["error_message"])
         self.assertIn("boom", finish_kwargs["error_message"])
+
+    def test_platform_with_empty_page_one_on_every_search_url_gets_flagged(self):
+        with patch("db_utils.start_crawl_run_log", return_value=9) as mock_start, \
+             patch("db_utils.finish_crawl_run_log") as mock_finish, \
+             patch.object(crawler._http, "get_proxy", return_value=None), \
+             patch("crawler._collect_page", return_value=[]):
+
+            result = crawler.run_incremental_crawl(
+                conn=MagicMock(), platforms=["imobiliare"],
+                districts={"Sector 1": ["A"], "Sector 2": ["B"]},
+            )
+
+        self.assertEqual(result, 0)
+        finish_kwargs = mock_finish.call_args.kwargs
+        self.assertEqual(finish_kwargs["status"], "success_with_warnings")
+        self.assertIn("imobiliare", finish_kwargs["error_message"])
+
+    def test_real_content_with_zero_new_listings_is_not_flagged_as_an_outage(self):
+        def fake_collect_page(scraper, search_url, page_num):
+            return ["https://www.storia.ro/a", "https://www.storia.ro/b"] if page_num == 1 else []
+
+        with patch("db_utils.start_crawl_run_log", return_value=10) as mock_start, \
+             patch("db_utils.finish_crawl_run_log") as mock_finish, \
+             patch.object(crawler._http, "get_proxy", return_value=None), \
+             patch("crawler._collect_page", side_effect=fake_collect_page), \
+             patch("crawler._known_urls", side_effect=lambda conn, links: set(links)):
+
+            crawler.run_incremental_crawl(
+                conn=MagicMock(), platforms=["storia"],
+                districts={"Sector 1": ["A"]},
+            )
+
+        finish_kwargs = mock_finish.call_args.kwargs
+        self.assertEqual(finish_kwargs["status"], "success")
+        self.assertIsNone(finish_kwargs["error_message"])
 
 
 if __name__ == "__main__":

@@ -69,6 +69,28 @@ class ApplyForSessionOlxGatingTests(unittest.TestCase):
         self.assertEqual(chosen, "http://p2")
         mock_set_proxy.assert_called_once_with("http://p2")
 
+    def test_gives_up_after_the_time_budget_instead_of_checking_every_proxy(self):
+        """BUGS.md #9a follow-up: each proxy check already has its own
+        per-request timeout, but nothing bounded the whole loop -- a
+        100-proxy pool that's mostly dead could in principle burn minutes
+        checking every single one before giving up. This caps the total
+        time spent regardless of how many proxies are left to try."""
+        rotator = ProxyRotator([f"http://p{i}" for i in range(5)])
+        with patch.dict(os.environ, {}, clear=False), \
+             patch.object(rotator, "_load_index", return_value=0), \
+             patch.object(rotator, "_save_index"), \
+             patch.object(rotator, "_verify", return_value=False) as mock_verify, \
+             patch("crawler.time.time", side_effect=[0, 1, 2, 100]), \
+             patch("scrapers.http.set_proxy") as mock_set_proxy:
+
+            chosen = rotator.apply_for_session()
+
+        self.assertIsNone(chosen)
+        mock_set_proxy.assert_called_once_with(None)
+        # Only 2 of the 5 proxies were actually checked before the time
+        # budget kicked in -- not all 5, exhausted the normal way.
+        self.assertEqual(mock_verify.call_count, 2)
+
     def test_olx_check_is_skipped_when_olx_not_in_check_platforms(self):
         rotator = ProxyRotator(["http://p1"])
         with patch.dict(os.environ, {}, clear=False), \

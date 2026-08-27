@@ -77,10 +77,11 @@ SUPABASE_ANON_KEY: str = os.environ.get("SUPABASE_ANON_KEY", "") or os.environ.g
 
 _client: Client | None = None
 _anon_client: Client | None = None
-_warned_anon_fallback = False
 
 # Columns that exist in the canonical Supabase schema.
-# Fields NOT in this set are stripped before upserting to avoid PostgREST 400 errors.
+# Fields NOT in this set are folded into `extras` before upserting (see
+# _clean_record step 7) rather than sent as top-level PostgREST columns,
+# which would 400.
 _CANONICAL_COLUMNS = frozenset({
     "url", "platform_id", "platform", "source_id",
     "title", "description",
@@ -95,17 +96,18 @@ _CANONICAL_COLUMNS = frozenset({
 
 # Raw scraper field names read and mapped by _clean_record's step 4, and
 # intentionally superseded by their canonical equivalent (e.g. rooms_num ->
-# rooms). Dropping these afterward is expected on every listing, not a
-# landmine — excluded here so the drop-logging below only fires for
-# genuinely unmapped fields.
+# rooms). Discarding these afterward is expected on every listing, not a
+# landmine — excluded here so the fold-into-extras logging below only fires
+# for genuinely unmapped fields.
 _KNOWN_RAW_ALIASES = frozenset({
     "link", "rent", "price", "rooms_num", "m",
     "location_full_name", "floor_no", "build_year",
 })
 
-# Columns actually read by the Streamlit results pipeline
-# (streamlit_interface/components/results.py, pipeline/utils.py) for
-# rendering and AI-ranking input. Everything else in _CANONICAL_COLUMNS is
+# Columns read by the Streamlit results pipeline
+# (streamlit_interface/components/results.py, pipeline/utils.py) plus
+# api/main.py's freshness badge and match-receipt feature checklist
+# (MIGRATION_PLAN.md Phase 1/3). Everything else in _CANONICAL_COLUMNS is
 # deliberately left out:
 #   - "extras", "embedding" (384-dim), "image_embedding" (512-dim): the
 #     heaviest columns in the table. Semantic-search similarity is computed
@@ -113,13 +115,14 @@ _KNOWN_RAW_ALIASES = frozenset({
 #     (pgvector's <=> operator) and joined back in by url afterward — this
 #     query never needs to see a raw vector. Pulling them for every row in a
 #     large district's result set is what caused the statement timeout on
-#     district queries like "Militari" (see BUGS.md #1).
+#     district queries like "Militari" (see BUGS.md #1). "features",
+#     "scraped_at" and "first_seen_at" are cheap scalar/small-JSONB columns
+#     by comparison, not part of what caused that timeout — safe to include.
 #   - "is_available": already enforced by the .eq() filter below: PostgREST
 #     filters on it independent of whether it's in the select list, and this
 #     result set is never displayed with an availability badge.
 #   - "platform_id", "source_id", "floor", "total_floors", "year_built",
-#     "heating", "features", "scraped_at", "first_seen_at", "last_seen_at":
-#     only used by the Analytics tab, which already has its own
+#     "heating": only used by the Analytics tab, which already has its own
 #     separately-scoped query (fetch_analytics_data()) — dropping them here
 #     costs that tab nothing. Add a column back here if a future UI (e.g. a
 #     "more details" expander) actually starts reading it.
@@ -127,7 +130,8 @@ _DISTRICT_QUERY_COLUMNS = (
     "url, title, description, "
     "price_eur, price_numeric, price_currency, "
     "district, location_full, "
-    "rooms, area_sqm, property_type, platform, image_urls"
+    "rooms, area_sqm, property_type, platform, image_urls, "
+    "features, scraped_at, first_seen_at"
 )
 
 
@@ -152,34 +156,26 @@ def get_anon_client() -> Client:
     policy in scripts/supabase_schema.sql (is_available = 1 rows only, no
     write access). Every function the Streamlit app calls uses this.
 
-    Falls back to the service-role key with a one-time warning if
-    SUPABASE_ANON_KEY isn't configured yet, so local dev and existing
-    deployments don't break before RLS is set up. That fallback defeats
-    the entire point of the split — it must not be relied on anywhere
-    user-facing is actually deployed.
+    Raises if SUPABASE_ANON_KEY isn't configured — it used to silently fall
+    back to the service-role key instead (with a one-time warning), so a
+    Streamlit-facing deployment missing that one env var would quietly hand
+    out full read/write/delete instead of failing loudly. Now that RLS is
+    confirmed working (BUGS.md #8), there's no reason to keep tolerating a
+    missing anon key: fail immediately instead of degrading into exactly the
+    vulnerability this split exists to prevent.
     """
-    global _anon_client, _warned_anon_fallback
+    global _anon_client
     if _anon_client is None:
         if not SUPABASE_URL:
             raise RuntimeError("SUPABASE_URL must be set in .env or environment")
-        key = SUPABASE_ANON_KEY
-        if not key:
-            if not _warned_anon_fallback:
-                print(
-                    "  [supabase] WARNING: SUPABASE_ANON_KEY not set — read queries "
-                    "are falling back to the service-role key. This defeats the "
-                    "anon/service-role split. Set SUPABASE_ANON_KEY (Supabase "
-                    "dashboard -> Settings -> API -> anon/public key) and run the "
-                    "RLS policy in scripts/supabase_schema.sql before deploying "
-                    "anywhere user-facing."
-                )
-                _warned_anon_fallback = True
-            key = SUPABASE_KEY
-            if not key:
-                raise RuntimeError(
-                    "SUPABASE_URL and (SUPABASE_ANON_KEY or SUPABASE_KEY) must be set"
-                )
-        _anon_client = create_client(SUPABASE_URL, key)
+        if not SUPABASE_ANON_KEY:
+            raise RuntimeError(
+                "SUPABASE_ANON_KEY (or SUPABASE_PUBLISH_KEY) must be set — "
+                "get_anon_client() no longer falls back to the service-role "
+                "key. Set it from the Supabase dashboard -> Settings -> API "
+                "-> anon/public key."
+            )
+        _anon_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     return _anon_client
 
 
@@ -392,19 +388,31 @@ def _clean_record(item: dict) -> dict | None:
         elif clean.get("title"):
             clean["property_type"] = "Apartament"
 
-    # 7. Strip columns that don't exist in the canonical schema.
-    #    This already caused one real production bug silently (Milestone 19:
+    # 7. Fold columns that don't exist in the canonical schema into `extras`
+    #    instead of discarding them. Originally these were just dropped —
+    #    that already caused one real production bug silently (Milestone 19:
     #    property_type wasn't in _CANONICAL_COLUMNS yet, so every scraper's
     #    attempt to set it vanished with no visible error for an unknown
-    #    period — only noticed when analytics looked empty). Log what gets
-    #    dropped so the next such gap surfaces immediately instead of via
-    #    "why does this field never show up in the DB" archaeology.
-    dropped = set(clean.keys()) - _CANONICAL_COLUMNS - _KNOWN_RAW_ALIASES
-    if dropped:
+    #    period — only noticed when analytics looked empty). The drop-logging
+    #    added afterward caught a live, ongoing case of exactly this pattern:
+    #    Storia's `characteristics` array gets flattened onto the raw item as
+    #    top-level fields (building_floors_num, building_material, deposit,
+    #    etc.), none of which are in _CANONICAL_COLUMNS, so they were being
+    #    silently discarded on every single Storia listing (see BUGS.md #3c).
+    #    Folding into `extras` (already a JSONB catch-all for platform-
+    #    specific fields) keeps that data queryable for future use instead of
+    #    losing it, without needing a schema migration for every new field a
+    #    platform happens to expose.
+    non_canonical = set(clean.keys()) - _CANONICAL_COLUMNS - _KNOWN_RAW_ALIASES
+    if non_canonical:
+        extras = clean.get("extras")
+        extras = dict(extras) if isinstance(extras, dict) else {}
+        for field in non_canonical:
+            extras.setdefault(field, clean[field])
+        clean["extras"] = extras
         print(
-            f"  [supabase] _clean_record: dropping non-canonical field(s) "
-            f"{sorted(dropped)} for {clean.get('url', '?')} — add to "
-            f"_CANONICAL_COLUMNS if this should be persisted"
+            f"  [supabase] _clean_record: folded non-canonical field(s) "
+            f"{sorted(non_canonical)} into extras for {clean.get('url', '?')}"
         )
     return {k: v for k, v in clean.items() if k in _CANONICAL_COLUMNS}
 

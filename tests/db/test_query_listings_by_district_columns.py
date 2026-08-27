@@ -3,8 +3,9 @@ Tests for two efficiency/correctness properties of
 db_utils.query_listings_by_district (BUGS.md #1):
 
 1. It must SELECT only the columns the Streamlit results pipeline
-   (streamlit_interface/components/results.py, pipeline/utils.py) actually
-   reads for rendering and AI-ranking input — not "*", and not every
+   (streamlit_interface/components/results.py, pipeline/utils.py) and
+   api/main.py's freshness badge / match-receipt checklist
+   (MIGRATION_PLAN.md Phase 1/3) actually read — not "*", and not every
    _CANONICAL_COLUMNS entry either. Excluded: "extras" (raw JSONB blob) and
    the two pgvector columns ("embedding" 384-dim, "image_embedding" 512-dim)
    — semantic-search similarity is computed server-side inside the
@@ -12,11 +13,13 @@ db_utils.query_listings_by_district (BUGS.md #1):
    never read off this query; "is_available" — already enforced by .eq()
    independent of the select list, and never displayed here; and the
    Analytics-tab-only fields ("platform_id", "source_id", "floor",
-   "total_floors", "year_built", "heating", "features", "scraped_at",
-   "first_seen_at", "last_seen_at"), which have their own separately-scoped
-   query (fetch_analytics_data()). The vector/blob columns in particular were
-   the prime suspect for the observed Postgres statement timeout on district
-   queries like "Militari".
+   "total_floors", "year_built", "heating", "last_seen_at"), which have
+   their own separately-scoped query (fetch_analytics_data()). The
+   vector/blob columns in particular were the prime suspect for the
+   observed Postgres statement timeout on district queries like "Militari";
+   "features"/"scraped_at"/"first_seen_at" are cheap scalar/small-JSONB
+   columns by comparison and were added back for the new API (not part of
+   what caused that timeout).
 
 2. is_available must be filtered with a strict eq(1), never widened to
    include -1 (blocked/transient) or 0 (expired) rows — showing either to
@@ -33,12 +36,13 @@ _EXPECTED_COLUMNS = frozenset({
     "price_eur", "price_numeric", "price_currency",
     "district", "location_full",
     "rooms", "area_sqm", "property_type", "platform", "image_urls",
+    "features", "scraped_at", "first_seen_at",
 })
 
 _DELIBERATELY_EXCLUDED_COLUMNS = frozenset({
     "extras", "embedding", "image_embedding", "is_available",
     "platform_id", "source_id", "floor", "total_floors", "year_built",
-    "heating", "features", "scraped_at", "first_seen_at", "last_seen_at",
+    "heating", "last_seen_at",
 })
 
 
