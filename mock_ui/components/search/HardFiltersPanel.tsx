@@ -10,16 +10,13 @@ const PROPERTY_TYPES: PropertyType[] = ["Apartament", "Garsoniera", "Studio", "C
 export function HardFiltersPanel({
   value,
   onChange,
+  bare = false,
 }: {
   value: HardFilters;
   onChange: (next: HardFilters) => void;
+  bare?: boolean;
 }) {
-  return (
-    <div className="rounded-lg border border-concrete/25 bg-white/40 p-4 sm:p-5">
-      <p className="mb-3 font-mono text-[0.68rem] uppercase tracking-[0.14em] text-concrete">
-        Filtre exacte
-      </p>
-
+  const content = (
       <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
         <div>
           <label className="mb-1.5 block text-xs font-medium text-concrete">Camere</label>
@@ -115,6 +112,16 @@ export function HardFiltersPanel({
           </div>
         </div>
       </div>
+  );
+
+  if (bare) return content;
+
+  return (
+    <div className="rounded-lg border border-concrete/25 bg-white/40 p-4 sm:p-5">
+      <p className="mb-3 font-mono text-[0.68rem] uppercase tracking-[0.14em] text-concrete">
+        Filtre exacte
+      </p>
+      {content}
     </div>
   );
 }

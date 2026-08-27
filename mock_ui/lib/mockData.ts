@@ -46,7 +46,7 @@ const POSITIVE_FEATURES = [
   { phrase: "Centrală proprie, apă caldă non-stop.", tag: "heating" },
   { phrase: "Loc de parcare inclus în preț.", tag: "parking" },
   { phrase: "Balcon generos, priveliște liberă.", tag: "balcony" },
-  { phrase: "Pet-friendly — acceptăm animale de companie.", tag: "pets" },
+  { phrase: "Pet-friendly, acceptăm animale de companie.", tag: "pets" },
   { phrase: "Complet mobilat și utilat.", tag: "furnished" },
   { phrase: "Zonă liniștită, departe de trafic.", tag: "quiet" },
 ] as const;
@@ -55,7 +55,7 @@ const NEGATIVE_FEATURES: Record<string, string> = {
   parking: "Fără loc de parcare propriu.",
   balcony: "Fără balcon.",
   pets: "Nu acceptăm animale de companie.",
-  furnished: "Nemobilat — apartament la gri.",
+  furnished: "Nemobilat, apartament la gri.",
   heating: "Căldură de la asociație, fără centrală proprie.",
 };
 

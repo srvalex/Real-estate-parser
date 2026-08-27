@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
-import { BarChart3, Search } from "lucide-react";
+import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import clsx from "clsx";
 import { Hero } from "./Hero";
 import { HardFiltersPanel } from "./HardFiltersPanel";
 import { VibePrompt } from "./VibePrompt";
@@ -14,13 +14,14 @@ import { ListingCard } from "@/components/results/ListingCard";
 import { SkeletonCard } from "@/components/results/SkeletonCard";
 import { EmptyState } from "@/components/results/EmptyState";
 import { PartialFailureBanner } from "@/components/results/PartialFailureBanner";
-import { getDistrictsBySector, ALL_LISTINGS } from "@/lib/mockData";
+import { ALL_LISTINGS } from "@/lib/mockData";
+import { getLocations } from "@/lib/locations";
 import { expandWithProximity } from "@/lib/zones";
 import { extractVibeFilters, isExcludedByDescription } from "@/lib/nlpFilters";
 import { applyHardFilters, scoreListings } from "@/lib/matching";
 import type { HardFilters, Platform, ScoredListing, SourceState, VibeFilters } from "@/lib/types";
 
-const DISTRICTS = getDistrictsBySector();
+const LOCATIONS = getLocations();
 const PLATFORMS: Platform[] = ["OLX", "Storia", "Imobiliare"];
 
 const DEFAULT_HARD_FILTERS: HardFilters = {
@@ -44,6 +45,7 @@ export function SearchExperience() {
   const [includeProximity, setIncludeProximity] = useState(false);
   const [zoneError, setZoneError] = useState<string | null>(null);
 
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("idle");
   const [pipelineStage, setPipelineStage] = useState<PipelineStage>("reading");
   const [sources, setSources] = useState<SourceState[]>(PLATFORMS.map((p) => ({ platform: p, status: "pending" })));
@@ -144,6 +146,17 @@ export function SearchExperience() {
     return sorted;
   }, [results, hiddenUrls, boostDistricts, sort]);
 
+  const hardFilterSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (hardFilters.rooms !== "Orice") parts.push(`${hardFilters.rooms} camere`);
+    if (hardFilters.maxPrice > 0) parts.push(`≤ ${hardFilters.maxPrice} €`);
+    if (hardFilters.minSqm > 0 || hardFilters.maxSqm > 0) {
+      parts.push(`${hardFilters.minSqm || 0}–${hardFilters.maxSqm || "∞"} m²`);
+    }
+    if (hardFilters.propertyTypes.length > 0) parts.push(hardFilters.propertyTypes.join(", "));
+    return parts;
+  }, [hardFilters]);
+
   const emptySuggestion = useMemo(() => {
     if (displayList.length > 0) return null;
     if (hardFilters.maxPrice > 0) {
@@ -186,22 +199,20 @@ export function SearchExperience() {
             exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.35, ease: "easeOut" }}
           >
-            <div className="mx-auto flex max-w-2xl justify-end px-4 pt-4">
-              <Link
-                href="/analytics"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-concrete hover:text-brick"
-              >
-                <BarChart3 className="h-3.5 w-3.5" /> Analiză de piață
-              </Link>
-            </div>
             <Hero />
             <div className="mx-auto max-w-2xl space-y-4 px-4 pb-24">
-              <HardFiltersPanel value={hardFilters} onChange={setHardFilters} />
-              <VibePrompt value={vibe} onChange={setVibe} detected={liveVibeFilters} />
+              <div className="relative z-10 -mt-10 sm:-mt-14">
+                <VibePrompt
+                  value={vibe}
+                  onChange={setVibe}
+                  detected={liveVibeFilters}
+                  onSubmit={stage === "idle" ? handleSearch : undefined}
+                />
+              </div>
 
               <div className="rounded-lg border border-concrete/25 bg-white/40 p-4 sm:p-5">
                 <ZoneSelector
-                  districts={DISTRICTS}
+                  locations={LOCATIONS}
                   selectedZones={zones}
                   onChangeZones={(z) => {
                     setZones(z);
@@ -214,15 +225,38 @@ export function SearchExperience() {
                 {zoneError && <p className="mt-3 text-sm text-brick">{zoneError}</p>}
               </div>
 
-              {stage === "idle" ? (
+              <div className="rounded-lg border border-concrete/25 bg-white/40">
                 <button
                   type="button"
-                  onClick={handleSearch}
-                  className="flex w-full items-center justify-center gap-2 rounded-sm bg-ink py-3 text-sm font-medium text-paper transition-colors hover:bg-brick"
+                  onClick={() => setFiltersOpen((o) => !o)}
+                  aria-expanded={filtersOpen}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left sm:px-5"
                 >
-                  <Search className="h-4 w-4" /> Caută locuințe
+                  <span className="flex items-center gap-2 text-sm font-medium text-ink">
+                    <SlidersHorizontal className="h-4 w-4 text-concrete" />
+                    Filtre exacte
+                    <span className="font-mono text-xs font-normal text-concrete">(cameră, preț, suprafață)</span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    {!filtersOpen &&
+                      hardFilterSummary.map((s) => (
+                        <span key={s} className="hidden font-mono text-xs text-brick sm:inline">
+                          {s}
+                        </span>
+                      ))}
+                    <ChevronDown
+                      className={clsx("h-4 w-4 text-concrete transition-transform", filtersOpen && "rotate-180")}
+                    />
+                  </span>
                 </button>
-              ) : (
+                {filtersOpen && (
+                  <div className="border-t border-concrete/20 p-4 pt-3 sm:p-5 sm:pt-3">
+                    <HardFiltersPanel value={hardFilters} onChange={setHardFilters} bare />
+                  </div>
+                )}
+              </div>
+
+              {stage !== "idle" && (
                 <div>
                   <StatusStepper stage={pipelineStage} sources={sources} />
                   {pipelineStage !== "reading" && (

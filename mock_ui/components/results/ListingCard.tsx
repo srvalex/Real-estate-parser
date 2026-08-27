@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BedDouble, EyeOff, MapPin, Ruler, Sparkles, Wand2 } from "lucide-react";
+import { ArrowUpRight, BedDouble, EyeOff, MapPin, Ruler, Sparkles, Wand2 } from "lucide-react";
 import clsx from "clsx";
 import type { ScoredListing, VibeFilters } from "@/lib/types";
 import { formatFreshness, formatPrice } from "@/lib/format";
@@ -94,7 +94,8 @@ export function ListingCard({
             "underline decoration-brick/40 underline-offset-4 hover:decoration-brick"
           )}
         >
-          Vezi anunțul →
+          Vezi anunțul
+          <ArrowUpRight className="h-3.5 w-3.5" />
         </a>
       </div>
 

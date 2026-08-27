@@ -25,7 +25,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Property Explorer — Bucharest",
+  title: "Property Explorer · Bucharest",
   description: "Describe the home you want. We find it across OLX, Storia and Imobiliare.",
 };
 

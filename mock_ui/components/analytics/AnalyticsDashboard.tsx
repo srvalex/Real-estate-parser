@@ -60,7 +60,7 @@ export function AnalyticsDashboard() {
         <Link href="/" className="inline-flex items-center gap-1.5 text-sm font-medium text-ink hover:text-brick">
           <ArrowLeft className="h-4 w-4" /> Căutare
         </Link>
-        <h1 className="font-display text-xl italic text-ink">Piața chiriilor — București</h1>
+        <h1 className="font-display text-xl italic text-ink">Piața chiriilor din București</h1>
         <span className="w-16" />
       </div>
 
@@ -127,7 +127,7 @@ export function AnalyticsDashboard() {
               <Line type="monotone" dataKey="median" name="Mediană" stroke="#3E4E3A" strokeWidth={2} dot={{ r: 3 }} />
             </ComposedChart>
           </ResponsiveContainer>
-          <p className="mt-1 text-center text-xs text-concrete">Click pe o bară pentru a vedea cartierele din sector ↓</p>
+          <p className="mt-1 text-center text-xs text-concrete">Click pe o bară pentru a vedea cartierele din sector</p>
         </ChartCard>
 
         <ChartCard title="Detaliu pe cartiere">

@@ -36,7 +36,7 @@ export function ImageCarousel({ images, alt, propertyType }: { images: ListingIm
           <div key={i} className="relative h-full w-full flex-shrink-0 snap-center">
             <Image
               src={img.medium ?? img.small ?? img.thumbnail ?? ""}
-              alt={i === 0 ? alt : `${alt} — foto ${i + 1}`}
+              alt={i === 0 ? alt : `${alt}, foto ${i + 1}`}
               fill
               sizes="(max-width: 640px) 100vw, 400px"
               className="object-cover"
