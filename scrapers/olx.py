@@ -57,6 +57,52 @@ def _extract_district_from_title(title: str) -> str | None:
     return None
 
 
+# OLX's per-listing "ad-parameters-container" always uses these exact
+# (non-accented) Romanian labels — confirmed live 2026-08-29 against a
+# Studio and a Garsoniera listing, identical label set and order on both.
+# Maps each label -> the raw field name _clean_record (db_utils.py) already
+# knows how to fold into a canonical column:
+#   "m"          -> area_sqm (parsed from "49 m²")
+#   "floor_no"   -> floor    (stored as-is — floor is TEXT, values like
+#                             "Parter"/"Demisol" aren't numeric)
+#   "build_year" -> year_built (stored as-is — often a fuzzy range/category
+#                             like "Dupa 2000" or "1990 - 2000", not a
+#                             clean year, so no attempt is made to parse
+#                             a single int out of it)
+# "compartimentare" has no canonical column and isn't one of _KNOWN_RAW_ALIASES,
+# so it folds into `extras` automatically via _clean_record step 7.
+_PARAM_LABELS = {
+    "compartimentare": "compartimentare",
+    "suprafata utila": "m",
+    "suprafață utilă": "m",
+    "an constructie": "build_year",
+    "an construcție": "build_year",
+    "etaj": "floor_no",
+}
+
+
+def _extract_params(soup: BeautifulSoup) -> dict:
+    """Parse OLX's native "ad-parameters-container" list into raw fields.
+
+    Each entry renders as "<Label>: <Value>" except the seller-type line
+    (e.g. "Persoana fizica"), which has no colon and is skipped here — not
+    one of the four target params.
+    """
+    container = soup.find(attrs={"data-testid": "ad-parameters-container"})
+    if not container:
+        return {}
+    out: dict = {}
+    for p in container.find_all("p"):
+        text = p.get_text(strip=True)
+        if ":" not in text:
+            continue
+        label, _, value = text.partition(":")
+        target = _PARAM_LABELS.get(label.strip().lower())
+        if target and value.strip():
+            out[target] = value.strip()
+    return out
+
+
 class OLXScraper(PlatformScraper):
 
     @property
@@ -211,23 +257,22 @@ class OLXScraper(PlatformScraper):
 
             image_urls = self._extract_images(soup)
 
-            return {
-                "url":    url,
-                "status": self.STATUS_OK,
-                "data": {
-                    "platform_id": self.platform_id,
-                    "platform":    self.display_name,
-                    "source_id":   source_id,
-                    "url":         url,
-                    "title":       title,
-                    "price_eur":   price,
-                    "rent":        price,
-                    "price":       price,
-                    "description": description,
-                    "district":    _extract_district_from_title(title),
-                    "image_urls":  image_urls,
-                },
+            data = {
+                "platform_id": self.platform_id,
+                "platform":    self.display_name,
+                "source_id":   source_id,
+                "url":         url,
+                "title":       title,
+                "price_eur":   price,
+                "rent":        price,
+                "price":       price,
+                "description": description,
+                "district":    _extract_district_from_title(title),
+                "image_urls":  image_urls,
             }
+            data.update(_extract_params(soup))
+
+            return {"url": url, "status": self.STATUS_OK, "data": data}
         except Exception as e:
             print(f"  [olx parse error] {url}: {e}")
             # Page loaded but parsing failed — treat as blocked (structure changed)

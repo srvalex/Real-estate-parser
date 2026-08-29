@@ -343,15 +343,18 @@ class ImobiliareRoScraper(PlatformScraper):
                     "large":     og_url,
                 })
 
-            # dl keys already consumed at top level — skip them in extras
-            _USED_DL = {
-                "listing_id", "listing_location_title",
-                "listing_location_slug", "onesignal_listing_bedroom",
-            }
             extras: dict = {}
 
-            # RealEstateListing structured fields
-            for ld_key in ("floorLevel", "numberOfRooms", "numberOfBathroomsTotal", "yearBuilt"):
+            # RealEstateListing structured fields. Confirmed live 2026-08-27
+            # against a real garsoniera listing: the Accommodation node has
+            # numberOfBedrooms, not numberOfRooms — schema.org defines them
+            # as distinct (total rooms vs. bedrooms specifically), and this
+            # site's template only ever populates the latter, so both are
+            # checked rather than assuming one.
+            for ld_key in (
+                "floorLevel", "numberOfRooms", "numberOfBedrooms",
+                "numberOfBathroomsTotal", "yearBuilt",
+            ):
                 val = listing.get(ld_key)
                 if val not in (None, ""):
                     extras[ld_key] = val
@@ -359,20 +362,22 @@ class ImobiliareRoScraper(PlatformScraper):
                 extras["floorSizeValue"] = floor_size["value"]
                 extras["floorSizeUnit"]  = floor_size.get("unitCode", "")
 
-            # additionalProperty arrays on Product and RealEstateListing nodes
-            for prop in (
-                listing.get("additionalProperty", [])
-                + product.get("additionalProperty", [])
-            ):
-                name = prop.get("name") or prop.get("propertyID", "")
-                val  = prop.get("value")
-                if name and val not in (None, ""):
-                    extras[name] = val
-
-            # Remaining dataLayer fields (all are listing-specific attributes)
-            for k, v in dl.items():
-                if k not in _USED_DL and v not in (None, "", [], {}):
-                    extras[k] = v
+            # NOTE: this site's current template does not mark up listing
+            # characteristics (heating, amenities, furnishing, security,
+            # construction status, ...) via schema.org additionalProperty
+            # microdata — confirmed live 2026-08-27, zero
+            # [itemprop="additionalProperty"] elements on a real listing
+            # page. That richer data exists only as plain rendered HTML in
+            # the page's "Detalii apartament"/"Utilități" section and needs
+            # real DOM/CSS-selector scraping to capture — not yet
+            # implemented. A previous version of this function also dumped
+            # every remaining key of the matched `dl` (dataLayer) entry into
+            # extras on the assumption they were "listing-specific
+            # attributes" — in fact that entry is a GTM pageview event
+            # object dominated by generic consent/tracking fields
+            # (ad_storage, session_hash, visitor_id, request_id, ...), none
+            # of which describe the property, so nothing further is pulled
+            # from `dl` here.
 
             result = {
                 "platform_id":        self.platform_id,
