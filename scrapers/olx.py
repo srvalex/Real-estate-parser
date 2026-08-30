@@ -15,41 +15,80 @@ from .http import get_content
 _DISTRICTS_FILE = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "Streamlit Interface", "districts.json"
 )
-_NEIGHBOURHOOD_MAP: dict | None = None  # {normalized_name: original_name}, longest-first
+
+# Non-Bucharest neighbourhood lists (GEO_EXPANSION_PLAN.md Phase 1 pilot).
+# Sourced live 2026-08-30 from Storia's own location-filter facet (the
+# "cartier" checkboxes shown when searching that city on storia.ro) rather
+# than hand-curated — the same "platform's own facets" approach the plan's
+# open decision recommended. Deliberately kept separate from
+# Streamlit Interface/districts.json rather than restructuring that file to
+# be city-keyed: several other consumers (mock_ui, api/locations.py,
+# streamlit_interface) still assume its flat Bucharest-only shape, and
+# restructuring it is out of scope for getting OLX district matching correct
+# on the new cities.
+_NON_BUCHAREST_NEIGHBOURHOODS: dict[str, list[str]] = {
+    "Cluj-Napoca": [
+        "Andrei Muresanu", "Becas", "Borhanci", "Bulgaria", "Buna Ziua",
+        "Centru", "Dambul Rotund", "Europa", "Faget", "Gheorgheni",
+        "Grigorescu", "Gruia", "Intre Lacuri", "Iris", "Manastur",
+        "Marasti", "Plopilor", "Someseni", "Sopor", "Zorilor",
+    ],
+    "Iasi": [
+        "Agronomie", "Alexandru Cel Bun", "Aviatiei", "Baza 3", "Bucium",
+        "Bularga", "Canta", "Cantemir", "Carol I", "Centru", "Copou",
+        "CUG", "Dacia", "Frumoasa", "Galata", "Gara", "Manta Rosie",
+        "Mircea cel Batran", "Moara de Vant", "Nicolina 1", "Nicolina 2",
+        "Pacurari", "Podu de Fier", "Podu Ros", "Tatarasi Nord",
+        "Tatarasi Sud", "Tesatura", "Ticau", "Tudor Vladimirescu",
+        "Uzinei", "Zona Industriala",
+    ],
+}
+
+_NEIGHBOURHOOD_MAPS_BY_CITY: dict[str, dict] = {}  # city -> {normalized_name: original_name}, longest-first
 
 
-def _get_neighbourhood_map() -> dict:
-    """Lazily load and return {normalised_name: original_name} sorted longest-first."""
-    global _NEIGHBOURHOOD_MAP
-    if _NEIGHBOURHOOD_MAP is None:
+def _normalize(text: str) -> str:
+    return (text.lower()
+            .replace("ă", "a").replace("î", "i").replace("â", "a")
+            .replace("ș", "s").replace("ț", "t"))
+
+
+def _get_neighbourhood_map(city: str = "Bucuresti") -> dict:
+    """Lazily build and return {normalised_name: original_name} for `city`,
+    sorted longest-first so e.g. "Drumul Taberei" matches before "Taberei".
+
+    Bucharest's list comes from Streamlit Interface/districts.json (120
+    hand-curated neighbourhoods); other cities come from
+    _NON_BUCHAREST_NEIGHBOURHOODS. Unknown cities return {} (no match, not
+    an error) rather than falling back to Bucharest's list.
+    """
+    if city in _NEIGHBOURHOOD_MAPS_BY_CITY:
+        return _NEIGHBOURHOOD_MAPS_BY_CITY[city]
+
+    if city == "Bucuresti":
         try:
             with open(_DISTRICTS_FILE, encoding="utf-8") as f:
                 districts = json.load(f)
+            names = [n for neighbourhoods in districts.values() for n in neighbourhoods]
         except Exception:
-            _NEIGHBOURHOOD_MAP = {}
-            return _NEIGHBOURHOOD_MAP
-        raw: dict[str, str] = {}
-        for neighbourhoods in districts.values():
-            for name in neighbourhoods:
-                norm = (name.lower()
-                        .replace("ă", "a").replace("î", "i").replace("â", "a")
-                        .replace("ș", "s").replace("ț", "t"))
-                raw[norm] = name
-        # Sort longest first so "Drumul Taberei" matches before "Taberei"
-        _NEIGHBOURHOOD_MAP = dict(sorted(raw.items(), key=lambda kv: -len(kv[0])))
-    return _NEIGHBOURHOOD_MAP
+            names = []
+    else:
+        names = _NON_BUCHAREST_NEIGHBOURHOODS.get(city, [])
+
+    raw = {_normalize(name): name for name in names}
+    neigh_map = dict(sorted(raw.items(), key=lambda kv: -len(kv[0])))
+    _NEIGHBOURHOOD_MAPS_BY_CITY[city] = neigh_map
+    return neigh_map
 
 
-def _extract_district_from_title(title: str) -> str | None:
-    """Return the first neighbourhood name found in *title*, or None."""
+def _extract_district_from_title(title: str, city: str = "Bucuresti") -> str | None:
+    """Return the first `city` neighbourhood name found in *title*, or None."""
     if not title:
         return None
-    neigh_map = _get_neighbourhood_map()
+    neigh_map = _get_neighbourhood_map(city)
     if not neigh_map:
         return None
-    title_norm = (title.lower()
-                  .replace("ă", "a").replace("î", "i").replace("â", "a")
-                  .replace("ș", "s").replace("ț", "t"))
+    title_norm = _normalize(title)
     for norm_name, original_name in neigh_map.items():
         pattern = r"(?<![a-z0-9])" + re.escape(norm_name) + r"(?![a-z0-9])"
         if re.search(pattern, title_norm):
@@ -105,6 +144,12 @@ def _extract_params(soup: BeautifulSoup) -> dict:
 
 class OLXScraper(PlatformScraper):
 
+    # crawler.run_incremental_crawl's early-exit ("new listings always appear
+    # on page 1") depends on search results being sorted newest-first — same
+    # reasoning as Storia's _SORT_PARAMS. OLX's default order isn't
+    # guaranteed to be that, so it's requested explicitly.
+    _SORT_PARAMS = "search%5Border%5D=created_at:desc"
+
     @property
     def platform_id(self) -> str:
         return "olx"
@@ -158,6 +203,8 @@ class OLXScraper(PlatformScraper):
                             f"/bucuresti/{slug}/?currency=EUR&search%5Bdistrict_id%5D={olx_id}"
                         )
 
+        urls = {u + f"&{self._SORT_PARAMS}" for u in urls}
+
         if max_price > 0:
             urls = {u + f"&search%5Bfilter_float_price:to%5D={max_price}" for u in urls}
 
@@ -207,7 +254,7 @@ class OLXScraper(PlatformScraper):
             return result["data"]
         return None
 
-    def scrape_listing_with_status(self, url: str) -> dict:
+    def scrape_listing_with_status(self, url: str, city: str = "Bucuresti") -> dict:
         """
         Fetch and parse a single OLX listing.
         Returns a dict with:
@@ -218,6 +265,13 @@ class OLXScraper(PlatformScraper):
           1. HTTP 410 Gone — OLX's canonical response for removed listings.
           2. data-testid="ad-inactive-msg" in the HTML — shown when OLX serves
              a soft-deleted page with a 200 instead of 410.
+
+        `city` selects which neighbourhood list _extract_district_from_title
+        matches the title against (Bucharest's districts.json, or one of
+        _NON_BUCHAREST_NEIGHBOURHOODS) — matching against the wrong city's
+        list risks a false-positive on a word that happens to coincide
+        between cities. Default stays "Bucuresti" so existing behavior is
+        unchanged for callers that don't pass it.
         """
         from curl_cffi import requests as cffi_requests
         from scrapers.http import HEADERS, get_proxy
@@ -267,7 +321,7 @@ class OLXScraper(PlatformScraper):
                 "rent":        price,
                 "price":       price,
                 "description": description,
-                "district":    _extract_district_from_title(title),
+                "district":    _extract_district_from_title(title, city),
                 "image_urls":  image_urls,
             }
             data.update(_extract_params(soup))

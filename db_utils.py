@@ -86,7 +86,7 @@ _CANONICAL_COLUMNS = frozenset({
     "url", "platform_id", "platform", "source_id",
     "title", "description",
     "price_eur", "price_numeric", "price_currency",
-    "district", "location_full",
+    "city", "district", "location_full",
     "rooms", "area_sqm", "floor", "total_floors", "year_built", "heating",
     "features", "image_urls", "extras",
     "property_type",
@@ -582,13 +582,19 @@ def get_listings_for_availability_check(
     platform_id: str | None = None,
     limit: int | None = None,
 ) -> list[dict]:
-    """Return [{url, platform_id}] for listings not yet confirmed expired.
+    """Return [{url, platform_id, city}] for listings not yet confirmed expired.
 
     Includes is_available=1 (re-confirm still live), NULL (never checked),
     and -1 (blocked/transient on a prior attempt — must be retried, not left
     in limbo forever). Skips is_available=0 (already confirmed expired — no
     point re-checking).
     If limit is set, returns at most that many rows.
+
+    `city` is selected alongside url/platform_id so a recheck can tell OLX's
+    scrape_listing_with_status which city a row belongs to (it gates
+    Bucharest-only title-based district matching) — without it, rechecking a
+    Cluj/Iași row would silently default to "Bucuresti" and risk a
+    false-positive district match.
     """
     client = get_client()
     rows: list[dict] = []
@@ -598,7 +604,7 @@ def get_listings_for_availability_check(
         try:
             q = (
                 client.table("listings")
-                .select("url, platform_id")
+                .select("url, platform_id, city")
                 .or_("is_available.eq.1,is_available.eq.-1,is_available.is.null")
             )
             if platform_id:
@@ -1064,6 +1070,35 @@ def log_user_search(
         return True
     except Exception as e:
         print(f"  [supabase] log_user_search failed: {e}")
+        return False
+
+
+def log_user_event(
+    event_type: str,
+    visitor_id: str,
+    session_id: str | None = None,
+    path: str | None = None,
+    metadata: dict | None = None,
+) -> bool:
+    """Insert one user_events row — minimal alpha traffic tracking
+    (page views, listing clicks). Search-specific detail belongs in
+    user_searches/log_user_search instead of here.
+
+    Fail-safe like log_user_search: a logging error must never break the
+    request that triggered it.
+    """
+    client = get_client()
+    try:
+        client.table("user_events").insert({
+            "event_type": event_type,
+            "visitor_id": visitor_id,
+            "session_id": session_id,
+            "path":       path,
+            "metadata":   metadata,
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"  [supabase] log_user_event failed: {e}")
         return False
 
 

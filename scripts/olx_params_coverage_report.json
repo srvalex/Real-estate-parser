@@ -1,0 +1,61 @@
+{
+  "sampled": 100,
+  "status_counts": {
+    "success": 95,
+    "expired": 5,
+    "blocked": 0
+  },
+  "field_coverage": {
+    "m": {
+      "count": 84,
+      "of": 95,
+      "examples": [
+        "34 m²",
+        "60 m²",
+        "36 m²",
+        "95 m²",
+        "105 m²"
+      ]
+    },
+    "floor_no": {
+      "count": 94,
+      "of": 95,
+      "examples": [
+        "5",
+        "2",
+        "10 si peste",
+        "2",
+        "6"
+      ]
+    },
+    "build_year": {
+      "count": 88,
+      "of": 95,
+      "examples": [
+        "inainte de 1977",
+        "1977 – 1990",
+        "Dupa 2000",
+        "1977 – 1990",
+        "1990 – 2000"
+      ]
+    },
+    "compartimentare": {
+      "count": 86,
+      "of": 95,
+      "examples": [
+        "Semidecomandat",
+        "Semidecomandat",
+        "Semidecomandat",
+        "Decomandat",
+        "Decomandat"
+      ]
+    }
+  },
+  "failures": [
+    "https://www.olx.ro/d/oferta/apartament-cu-loc-de-parcare-echo-tineretului-IDkSDq9.html?search_reason=search%7Corganic -> expired",
+    "https://www.olx.ro/d/oferta/inchiriere-apartament-2-camere-cartierul-latin-loc-parcare-IDkSeTz.html?search_reason=search%7Corganic -> expired",
+    "https://www.olx.ro/d/oferta/inchiriez-apartament-2-camere-exigent-plaza-etaj-7-mobilat-utilat-complet-cu-loc-de-parcare-inclus-in-pret-IDkvbvI.html?search_reason=search%7Cpromoted -> expired",
+    "https://www.olx.ro/d/oferta/inchiriere-apartament-2-camere-zona-apusul-7-min-metrou-renovat-IDkiIvK.html?search_reason=search%7Corganic -> expired",
+    "https://www.olx.ro/d/oferta/inchiriere-apartament-2-camere-cartierul-latin-loc-parcare-IDkSeTz.html?search_reason=search%7Cpromoted -> expired"
+  ]
+}

@@ -40,6 +40,23 @@ DISTRICTS_FILE = os.path.join(
     os.path.dirname(__file__), "Streamlit Interface", "districts.json"
 )
 
+# Multi-city pilot (GEO_EXPANSION_PLAN.md Phase 1: Cluj-Napoca + Iași).
+# Unlike Bucharest's sector/neighbourhood-based build_search_urls, these are
+# single whole-city search URLs (no per-neighbourhood split needed at this
+# volume) — live-verified against each platform 2026-08-30. Imobiliare has
+# no URL yet for either city, so it stays Bucharest-only for now.
+# platform_id -> list of (city, search_url)
+EXTRA_CITY_SEARCHES: dict[str, list[tuple[str, str]]] = {
+    "storia": [
+        ("Iasi", "https://www.storia.ro/ro/rezultate/inchiriere/apartament/iasi/iasi?ownerTypeSingleSelect=ALL&by=LATEST&direction=DESC"),
+        ("Cluj-Napoca", "https://www.storia.ro/ro/rezultate/inchiriere/apartament/cluj/cluj--napoca?limit=36&by=LATEST&direction=DESC"),
+    ],
+    "olx": [
+        ("Iasi", "https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/iasi_39939/?currency=EUR&search%5Border%5D=created_at:desc"),
+        ("Cluj-Napoca", "https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/cluj-napoca/?currency=EUR&search%5Border%5D=created_at:desc"),
+    ],
+}
+
 
 class ProxyRotator:
     """
@@ -347,16 +364,24 @@ def _owner(url: str) -> str:
 
 
 def _scrape_and_save(
-    conn: sqlite3.Connection, urls_by_platform: dict[str, list[str]]
+    conn: sqlite3.Connection,
+    urls_by_platform: dict[str, list[str]],
+    city: str,
 ) -> int:
-    """Scrape new URLs (grouped by platform) and persist them. Returns saved count."""
+    """Scrape new URLs (grouped by platform) and persist them. Returns saved count.
+
+    `city` is required (no default) and stamped onto every saved record here
+    — sourced from which search URL produced the listing, not parsed/guessed
+    from the listing page itself (GEO_EXPANSION_PLAN.md Phase 1). No implicit
+    "Bucuresti" fallback: every call site must state which city it crawled.
+    """
     all_new = []
 
     for pid, urls in urls_by_platform.items():
         if not urls:
             continue
         scraper = SCRAPERS[pid]
-        print(f"    ↳ scraping {len(urls)} {scraper.display_name} listing(s)…")
+        print(f"    ↳ scraping {len(urls)} {scraper.display_name} listing(s) [{city}]…")
 
         if isinstance(scraper, (StoriaScraper, ImobiliareRoScraper)):
             for i in range(0, len(urls), scraper.BATCH_SIZE):
@@ -367,7 +392,7 @@ def _scrape_and_save(
                 time.sleep(random.uniform(0.8, 2.5))
         else:
             for url in urls:
-                result = scraper.scrape_listing_with_status(url)
+                result = scraper.scrape_listing_with_status(url, city=city)
                 status = result.get("status")
                 if status == "success":
                     data = result["data"]
@@ -383,6 +408,9 @@ def _scrape_and_save(
                         }
                     )
                 time.sleep(random.uniform(0.8, 2.5))
+
+    for item in all_new:
+        item["city"] = city
 
     if all_new:
         _save_new_listings(all_new, conn)
@@ -449,16 +477,19 @@ def run_full_crawl(
                     max_price=max_price,
                     full_sectors=full_sectors,
                 )
+                search_targets = [("Bucuresti", u) for u in search_urls] + list(
+                    EXTRA_CITY_SEARCHES.get(pid, [])
+                )
 
                 print(f"\n{'='*60}")
                 print(
                     f"[{scraper.display_name}] full crawl — "
-                    f"{len(search_urls)} search URLs, up to {max_pages} pages each"
+                    f"{len(search_targets)} search URLs, up to {max_pages} pages each"
                 )
 
                 empty_first_page_count = 0
 
-                for search_url in search_urls:
+                for city, search_url in search_targets:
                     url_new = 0
                     for page_num in range(1, max_pages + 1):
                         links = _collect_page(scraper, search_url, page_num)
@@ -485,16 +516,16 @@ def run_full_crawl(
                                     by_platform.setdefault(opid, []).append(url)
                                 else:
                                     print(f"    [skip] no scraper owns: {url}")
-                            saved = _scrape_and_save(conn, by_platform)
+                            saved = _scrape_and_save(conn, by_platform, city=city)
                             scraped_this_run.update(new_links)
                             url_new += saved
 
                         time.sleep(random.uniform(1.5, 3.0))
 
-                    print(f"  → {url_new} new listings from this search URL")
+                    print(f"  → {url_new} new listings from this search URL [{city}]")
                     total_new += url_new
 
-                if search_urls and empty_first_page_count == len(search_urls):
+                if search_targets and empty_first_page_count == len(search_targets):
                     print(
                         f"  [warning] {scraper.display_name}: every search URL "
                         f"returned empty on page 1 — likely blocked or the "
@@ -587,17 +618,20 @@ def run_incremental_crawl(
                     max_price=max_price,
                     full_sectors=full_sectors,
                 )
+                search_targets = [("Bucuresti", u) for u in search_urls] + list(
+                    EXTRA_CITY_SEARCHES.get(pid, [])
+                )
 
                 print(f"\n{'='*60}")
                 print(
                     f"[{scraper.display_name}] incremental — "
-                    f"{len(search_urls)} search URLs, "
+                    f"{len(search_targets)} search URLs, "
                     f"max {max_pages} pages, stop at {stop_threshold:.0%} known"
                 )
 
                 empty_first_page_count = 0
 
-                for search_url in search_urls:
+                for city, search_url in search_targets:
                     url_new = 0
                     for page_num in range(1, max_pages + 1):
                         links = _collect_page(scraper, search_url, page_num)
@@ -624,7 +658,7 @@ def run_incremental_crawl(
                                     by_platform.setdefault(opid, []).append(url)
                                 else:
                                     print(f"    [skip] no scraper owns: {url}")
-                            saved = _scrape_and_save(conn, by_platform)
+                            saved = _scrape_and_save(conn, by_platform, city=city)
                             scraped_this_run.update(new_links)
                             url_new += saved
 
@@ -636,7 +670,7 @@ def run_incremental_crawl(
 
                     total_new += url_new
 
-                if search_urls and empty_first_page_count == len(search_urls):
+                if search_targets and empty_first_page_count == len(search_targets):
                     print(
                         f"  [warning] {scraper.display_name}: every search URL "
                         f"returned empty on page 1 — likely blocked or the "
@@ -776,11 +810,13 @@ def run_availability_check(
             return
 
         by_platform: dict[str, list[str]] = {}
+        url_to_city: dict[str, str] = {}
         for row in all_listings:
             pid = row.get("platform_id", "")
             url = row.get("url", "")
             if pid and url:
                 by_platform.setdefault(pid, []).append(url)
+                url_to_city[url] = row.get("city") or "Bucuresti"
 
         print(
             f"[avail-check] {len(all_listings)} listings across "
@@ -812,7 +848,7 @@ def run_availability_check(
 
             if pid == "olx":
                 for idx, url in enumerate(urls, 1):
-                    result = scraper.scrape_listing_with_status(url)
+                    result = scraper.scrape_listing_with_status(url, city=url_to_city.get(url, "Bucuresti"))
                     status = result.get("status")
                     if status == "expired":
                         pending.append({"url": url, "is_available": 0})

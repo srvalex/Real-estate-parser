@@ -4,7 +4,7 @@ api/schemas.py
 Pydantic response models, matching mock_ui/lib/types.ts::ScoredListing
 field-for-field so the frontend's existing types need minimal changes.
 """
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -56,3 +56,19 @@ class SearchResponse(BaseModel):
     page_size: int
     embedding_sorted: bool
     embed_error: Optional[str] = None
+
+
+class EventIn(BaseModel):
+    """POST /events body — minimal alpha traffic tracking, see user_events
+    in scripts/supabase_schema.sql (section 9d). event_type is restricted
+    to the alpha's known set (extend this Literal, not a free string, when
+    a new event type is actually needed)."""
+    event_type: Literal["page_view", "listing_click"]
+    visitor_id: str
+    session_id: Optional[str] = None
+    path: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
+class EventOut(BaseModel):
+    logged: bool

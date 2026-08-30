@@ -78,6 +78,15 @@ ALTER TABLE listings ADD COLUMN IF NOT EXISTS image_embedding vector(512);
 --     ON listings USING ivfflat (image_embedding vector_cosine_ops)
 --     WITH (lists = 100);
 
+-- 4c. Multi-city support (GEO_EXPANSION_PLAN.md Phase 0). No column DEFAULT
+--     on purpose — every writer (crawler.py's _scrape_and_save) must set
+--     city explicitly per search URL rather than relying on an implicit
+--     fallback. Existing rows are backfilled once, explicitly, below (all
+--     pre-existing rows are Bucharest, since second-city crawling starts now).
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS city TEXT;
+UPDATE listings SET city = 'Bucuresti' WHERE city IS NULL;
+CREATE INDEX IF NOT EXISTS idx_listings_city_district ON listings (city, district);
+
 -- 5. Text similarity search function (used in P2.3 to replace ChromaDB web_archive)
 --
 --    candidate_urls (added later): when given, scores EVERY url in that
@@ -367,3 +376,33 @@ CREATE INDEX IF NOT EXISTS idx_user_searches_session     ON user_searches (sessi
 
 ALTER TABLE user_searches ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON user_searches FROM anon;
+
+-- 9d. User events — minimal generic traffic tracking for the alpha release
+--     (Roadmap.md Month 4.1 / alpha cost-tracking discussion). Deliberately
+--     narrow: page views and listing-card clicks only, enough to measure
+--     "did anyone show up and use it" during the alpha. Full interaction
+--     logging (session duration, template photo selections, preference
+--     learning per Roadmap 4.2) stays a later, separate build — not this
+--     table's job. Search-specific detail already lives in user_searches
+--     (9c); this table is for everything else.
+--
+--     Written exclusively via db_utils.log_user_event() (service-role),
+--     called from a POST /events endpoint — the frontend never holds a
+--     Supabase key, same rule as every other write path
+--     (MIGRATION_PLAN.md principle #3).
+CREATE TABLE IF NOT EXISTS user_events (
+    id            BIGSERIAL   PRIMARY KEY,
+    event_type    TEXT        NOT NULL,  -- 'page_view' | 'listing_click' (open-ended, not enforced by a CHECK — same convention as crawl_run_logs.status)
+    visitor_id    TEXT        NOT NULL,  -- anonymous, client-generated, persists across sessions
+    session_id    TEXT,                  -- groups events within one browsing session; nullable, not every event needs it
+    occurred_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    path          TEXT,                  -- page path / context, e.g. '/' or a listing URL
+    metadata      JSONB                  -- small free-form payload, e.g. {"listing_url": "..."} for a click
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_events_occurred_at ON user_events (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_events_visitor     ON user_events (visitor_id);
+CREATE INDEX IF NOT EXISTS idx_user_events_type         ON user_events (event_type);
+
+ALTER TABLE user_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON user_events FROM anon;

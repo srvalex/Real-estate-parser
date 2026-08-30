@@ -7,8 +7,16 @@ MIGRATION_PLAN.md Phase 1 (hard filters) + Phase 3 (vibe ranking), combined
 in one pass. Hard filters only, from explicit request params — no
 spaCy/agent NLP backfill of unset fields yet (Phase 5's job).
 
+POST /events — minimal alpha traffic tracking (page views, listing
+clicks), writing to user_events (scripts/supabase_schema.sql section 9d).
+The frontend never holds a Supabase key, so this is the only way it can
+record an event — same rule as every other write path
+(MIGRATION_PLAN.md principle #3).
+
 Uses get_anon_client() throughout (via db_utils), never get_client() —
-same rule as every Streamlit-facing read today.
+same rule as every Streamlit-facing read today. log_user_search and
+log_user_event are the only exceptions, by design: they're backend-only
+writes to observability tables, not user-facing reads.
 """
 import ast
 import os
@@ -22,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import db_utils
 import pipeline_core
 from api.locations import sector_for
-from api.schemas import SearchResponse
+from api.schemas import EventIn, EventOut, SearchResponse
 from embedding import embed_query
 
 app = FastAPI(title="Real Estate Search API")
@@ -33,7 +41,7 @@ _allowed_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -201,3 +209,15 @@ def search_listings(
         "embedding_sorted": embedding_sorted,
         "embed_error": embed_error,
     }
+
+
+@app.post("/events", response_model=EventOut)
+def log_event(event: EventIn):
+    logged = db_utils.log_user_event(
+        event_type=event.event_type,
+        visitor_id=event.visitor_id,
+        session_id=event.session_id,
+        path=event.path,
+        metadata=event.metadata,
+    )
+    return {"logged": logged}

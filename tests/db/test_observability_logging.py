@@ -1,6 +1,6 @@
 """
-Tests for the crawl_run_logs / availability_check_logs / user_searches
-logging helpers in db_utils.py.
+Tests for the crawl_run_logs / availability_check_logs / user_searches /
+user_events logging helpers in db_utils.py.
 
 These are backend-only observability tables (see scripts/supabase_schema.sql
 section 9) — every function here must use get_client() (service-role),
@@ -168,6 +168,76 @@ class UserSearchLogTests(unittest.TestCase):
             http_method="GET", http_path="/listings/search",
             form_fields={}, results_count=0,
         )
+
+        self.assertFalse(result)
+
+
+class UserEventLogTests(unittest.TestCase):
+    def setUp(self):
+        self.service_client = MagicMock()
+        self.anon_client = MagicMock()
+        self._service_patch = patch.object(db_utils, "get_client", return_value=self.service_client)
+        self._anon_patch = patch.object(db_utils, "get_anon_client", return_value=self.anon_client)
+        self.mock_service = self._service_patch.start()
+        self.mock_anon = self._anon_patch.start()
+        self.addCleanup(self._service_patch.stop)
+        self.addCleanup(self._anon_patch.stop)
+
+    def test_uses_service_client_not_anon(self):
+        table = self.service_client.table.return_value
+        table.insert.return_value = table
+        table.execute.return_value = MagicMock(data=[{"id": 1}])
+
+        db_utils.log_user_event(event_type="page_view", visitor_id="visitor-1")
+
+        self.mock_service.assert_called()
+        self.mock_anon.assert_not_called()
+
+    def test_insert_payload_carries_all_fields(self):
+        table = self.service_client.table.return_value
+        table.insert.return_value = table
+        table.execute.return_value = MagicMock(data=[{"id": 1}])
+
+        db_utils.log_user_event(
+            event_type="listing_click",
+            visitor_id="visitor-1",
+            session_id="sess-1",
+            path="/",
+            metadata={"listing_url": "https://example.com/a"},
+        )
+
+        insert_payload = table.insert.call_args.args[0]
+        self.assertEqual(insert_payload["event_type"], "listing_click")
+        self.assertEqual(insert_payload["visitor_id"], "visitor-1")
+        self.assertEqual(insert_payload["session_id"], "sess-1")
+        self.assertEqual(insert_payload["path"], "/")
+        self.assertEqual(insert_payload["metadata"], {"listing_url": "https://example.com/a"})
+
+    def test_optional_fields_default_to_none(self):
+        table = self.service_client.table.return_value
+        table.insert.return_value = table
+        table.execute.return_value = MagicMock(data=[{"id": 1}])
+
+        db_utils.log_user_event(event_type="page_view", visitor_id="visitor-1")
+
+        insert_payload = table.insert.call_args.args[0]
+        self.assertIsNone(insert_payload["session_id"])
+        self.assertIsNone(insert_payload["path"])
+        self.assertIsNone(insert_payload["metadata"])
+
+    def test_returns_true_on_success(self):
+        table = self.service_client.table.return_value
+        table.insert.return_value = table
+        table.execute.return_value = MagicMock(data=[{"id": 1}])
+
+        result = db_utils.log_user_event(event_type="page_view", visitor_id="visitor-1")
+
+        self.assertTrue(result)
+
+    def test_returns_false_on_exception_without_raising(self):
+        self.service_client.table.side_effect = Exception("network blip")
+
+        result = db_utils.log_user_event(event_type="page_view", visitor_id="visitor-1")
 
         self.assertFalse(result)
 

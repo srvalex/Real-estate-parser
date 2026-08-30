@@ -1,0 +1,3251 @@
+{
+  "sampled_rows": {
+    "Storia": 40,
+    "OLX": 0,
+    "Imobiliare.ro": 40
+  },
+  "keys": {
+    "id": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "10566201",
+        "10566199",
+        "10566198"
+      ]
+    },
+    "seo.title": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"2 camere, apartament de inchiriat - Bucuresti (judet), Colentina - 10566201 ...",
+        "\"2 camere, apartament de inchiriat - Bucuresti (judet), Obor - 10566199 • www...",
+        "\"4 camere, apartament de inchiriat - Bucuresti (judet), Colentina - 10566198 ..."
+      ]
+    },
+    "seo.description": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"Vezi acest apartamente de inchiriat cu 2 in Bucuresti (judet), Colentina, la...",
+        "\"Vezi acest apartamente de inchiriat cu 2 in Bucuresti (judet), Obor, la 540 ...",
+        "\"Vezi acest apartamente de inchiriat cu 4 in Bucuresti (judet), Colentina, la..."
+      ]
+    },
+    "url": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"https://www.storia.ro/ro/oferta/ap-2-camere-rose-garden-pet-friendly-parcare...",
+        "\"https://www.storia.ro/ro/oferta/ap-2-camere-iancului-bloc-reabilitat-bucatar...",
+        "\"https://www.storia.ro/ro/oferta/ap-4-camere-la-vila-centrala-proprie-curte-b..."
+      ]
+    },
+    "slug": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"ap-2-camere-rose-garden-pet-friendly-parcare-bloc-nou-modern-IDIkKB\"",
+        "\"ap-2-camere-iancului-bloc-reabilitat-bucatarie-inchisa-modern-IDIkKz\"",
+        "\"ap-4-camere-la-vila-centrala-proprie-curte-bucatarie-inchisa-IDIkKy\""
+      ]
+    },
+    "links.videoUrl": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\"",
+        "\"https://www.youtube.com/embed/7uB5c0wtkLY\""
+      ]
+    },
+    "links.view3dUrl": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "links.localPlanUrl": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "links.walkaroundUrl": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "owner.id": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "4134121",
+        "5005670",
+        "3971968"
+      ]
+    },
+    "owner.name": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"AM Imobiliare \"",
+        "\"EXP Romania\"",
+        "\"Crosspoint Real Estate\""
+      ]
+    },
+    "owner.type": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"agency\"",
+        "\"private\""
+      ]
+    },
+    "owner.phones": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"+40731840533\"]",
+        "[\"+40735667838\"]",
+        "[\"+40722640069\"]"
+      ]
+    },
+    "owner.address": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null",
+        "string"
+      ],
+      "examples": [
+        "\"Marului, 077085, Ilfov\"",
+        "\"Calea Floreasca, Nr 169A, 014459, Bucuresti\"",
+        "\"Gheorghe Titeica nr. 212-214, Et. 3, 020305, Bucuresti\""
+      ]
+    },
+    "owner.contacts[].name": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"Mihaela Mariuta\"",
+        "\"Florentin Bazgan\"",
+        "\"Alexandra Marinescu\""
+      ]
+    },
+    "owner.contacts[].phone": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"+40731840533\"",
+        "\"+40730783084\"",
+        "\"+40756118338\""
+      ]
+    },
+    "owner.contacts[].imageURLSmall": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null",
+        "string"
+      ],
+      "examples": [
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJmbiI6ImtxOHhvOHF5ZGdidDEtQVJPI...",
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJmbiI6ImluZTBlaWh3bTljMS1BUk8if...",
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJmbiI6IjIzZXJrOW14dGs5aDMtQVJPI..."
+      ]
+    },
+    "owner.contacts[].hasPhoneNumber": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "true"
+      ]
+    },
+    "owner.imageUrl": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null",
+        "string"
+      ],
+      "examples": [
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV...",
+        "null"
+      ]
+    },
+    "plans": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "price.type": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"VISIBLE\""
+      ]
+    },
+    "title": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"AP. 2 CAMERE- ROSE GARDEN, PET-FRIENDLY, PARCARE, BLOC NOU, MODERN\"",
+        "\"AP. 2 CAMERE- IANCULUI, BLOC REABILITAT, BUCATARIE INCHISA, MODERN\"",
+        "\"AP. 4 CAMERE - LA VILA, CENTRALA PROPRIE, CURTE, BUCATARIE INCHISA\""
+      ]
+    },
+    "images[].large": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV..."
+      ]
+    },
+    "images[].small": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV..."
+      ]
+    },
+    "images[].medium": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV..."
+      ]
+    },
+    "images[].thumbnail": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV..."
+      ]
+    },
+    "images[].isExterior": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "false",
+        "true"
+      ]
+    },
+    "market": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"ALL\""
+      ]
+    },
+    "source": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"urn:partner:crmrebs-prod\"",
+        "\"urn:partner:immoflux\"",
+        "\"urn:partner:softimobiliar\""
+      ]
+    },
+    "status": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"active\""
+      ]
+    },
+    "target.Id": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"10566201\"",
+        "\"10566199\"",
+        "\"10566198\""
+      ]
+    },
+    "target.env": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"production\""
+      ]
+    },
+    "target.Area": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"56\"",
+        "\"60\"",
+        "\"250\""
+      ]
+    },
+    "target.City": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "target.Photo": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"aHR0cHM6Ly9pcmVsYW5kLmFwb2xsby5vbHhjZG4uY29tL3YxL2ZpbGVzL2V5Sm1iaUk2SWpGM1l6...",
+        "\"aHR0cHM6Ly9pcmVsYW5kLmFwb2xsby5vbHhjZG4uY29tL3YxL2ZpbGVzL2V5Sm1iaUk2SW5oMGRE...",
+        "\"aHR0cHM6Ly9pcmVsYW5kLmFwb2xsby5vbHhjZG4uY29tL3YxL2ZpbGVzL2V5Sm1iaUk2SW1OeGR6..."
+      ]
+    },
+    "target.Price": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "620",
+        "540",
+        "950"
+      ]
+    },
+    "target.Title": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"QVAuIDIgQ0FNRVJFLSBST1NFIEdBUkRFTiwgUEVULUZSSUVORExZLCBQQVJDQVJFLCBCTE9DIE5P...",
+        "\"QVAuIDIgQ0FNRVJFLSBJQU5DVUxVSSwgQkxPQyBSRUFCSUxJVEFULCBCVUNBVEFSSUUgSU5DSElT...",
+        "\"QVAuIDQgQ0FNRVJFIC0gTEEgVklMQSwgQ0VOVFJBTEEgUFJPUFJJRSwgQ1VSVEUsIEJVQ0FUQVJJ..."
+      ]
+    },
+    "target.City_id": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "target.Country": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"România\""
+      ]
+    },
+    "target.Floor_no": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"floor_10\"]",
+        "[\"floor_5\"]",
+        "[\"floor_1\"]"
+      ]
+    },
+    "target.Province": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "target.AreaRange": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "target.OfferType": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"inchiriere\""
+      ]
+    },
+    "target.Rooms_num": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"2\"]",
+        "[\"4\"]",
+        "[\"3\"]"
+      ]
+    },
+    "target.Subregion": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "target.hidePrice": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"0\""
+      ]
+    },
+    "target.seller_id": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"4134121\"",
+        "\"5005670\"",
+        "\"3971968\""
+      ]
+    },
+    "target.user_type": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"agency\"",
+        "\"private\""
+      ]
+    },
+    "target.PriceRange": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"501-1000\"]",
+        "[\"2001-3000\"]",
+        "[\"1501-2000\"]"
+      ]
+    },
+    "target.ProperType": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"apartament\""
+      ]
+    },
+    "target.categoryId": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"102\""
+      ]
+    },
+    "target.ObidoAdvert": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"n\""
+      ]
+    },
+    "target.RegularUser": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"n\"",
+        "\"y\""
+      ]
+    },
+    "target.Building_floors_num": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"11\"",
+        "\"8\"",
+        "\"1\""
+      ]
+    },
+    "videos": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "openDay": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "category.id": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "102"
+      ]
+    },
+    "category.name": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "features": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "location.id": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"orn:storiaro:location:bucuresti/sectorul-2/colentina\"",
+        "\"orn:storiaro:location:bucuresti/sectorul-2/pantelimon\"",
+        "\"orn:storiaro:location:bucuresti/sectorul-2/ion-creanga\""
+      ]
+    },
+    "location.address.city": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "location.address.county": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "location.address.district": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "location.address.province": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "location.address.postalCode": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "location.address.subdistrict": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "location.address.municipality": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "location.mapDetails.zoom": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "12",
+        "16",
+        "14"
+      ]
+    },
+    "location.mapDetails.radius": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "100",
+        "0"
+      ]
+    },
+    "location.mapDetails.__typename": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"MapDetails\""
+      ]
+    },
+    "location.coordinates.latitude": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "44.458458",
+        "44.442936",
+        "44.476223"
+      ]
+    },
+    "location.coordinates.longitude": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "26.131557",
+        "26.133224",
+        "26.164753"
+      ]
+    },
+    "location.coordinates.__typename": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"Coordinates\""
+      ]
+    },
+    "location.reverseGeocoding.locations[]": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "{\"id\": \"bucuresti\", \"name\": \"Bucuresti\", \"fullName\": \"Bucuresti\", \"parentIds\"...",
+        "{\"id\": \"bucuresti/sectorul-2\", \"name\": \"Sectorul 2\", \"fullName\": \"Sectorul 2,...",
+        "{\"id\": \"bucuresti/sectorul-2/colentina\", \"name\": \"Colentina\", \"fullName\": \"Co..."
+      ]
+    },
+    "publicId": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "services": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "createdAt": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"2026-08-27T05:59:35Z\"",
+        "\"2026-08-27T05:59:03Z\"",
+        "\"2026-08-27T05:58:32Z\""
+      ]
+    },
+    "adCategory.id": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "102"
+      ]
+    },
+    "adCategory.name": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"FLAT\""
+      ]
+    },
+    "adCategory.type": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"RENT\""
+      ]
+    },
+    "advertType": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"AGENCY\"",
+        "\"PRIVATE\""
+      ]
+    },
+    "attributes.m": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"56\"",
+        "\"60\"",
+        "\"250\""
+      ]
+    },
+    "attributes.floor_no": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"floor_10\"",
+        "\"floor_5\"",
+        "\"floor_1\""
+      ]
+    },
+    "attributes.rooms_num": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"2\"",
+        "\"4\"",
+        "\"3\""
+      ]
+    },
+    "attributes.building_floors_num": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"11\"",
+        "\"8\"",
+        "\"1\""
+      ]
+    },
+    "externalId": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"CP3340296\"",
+        "\"CP3340295\"",
+        "\"CP3340294\""
+      ]
+    },
+    "floorPlans": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list",
+        "null"
+      ],
+      "examples": [
+        "null",
+        "[\"https://ireland.apollo.olxcdn.com/v1/files/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpX..."
+      ]
+    },
+    "modifiedAt": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"2026-08-27T05:59:42Z\"",
+        "\"2026-08-27T05:59:12Z\"",
+        "\"2026-08-27T05:58:41Z\""
+      ]
+    },
+    "pushedUpAt": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "unitGroups.items": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "unitGroups.unitsGroupBy": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "breadcrumbs": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "description": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"AM Imobiliare va prezinta spre inchiriere un apartament de 2 camere, decoman...",
+        "\"AM Imobiliare va prezinta spre inchiriere un apartament de 4 camere (3 dormi...",
+        "\"AM Imobiliare va prezinta spre inchiriere un apartament de 2 camere, semidec..."
+      ]
+    },
+    "referenceId": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"CP3340296\"",
+        "\"CP3340295\"",
+        "\"CP3340294\""
+      ]
+    },
+    "developerURL": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "specialOffer": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "developmentId": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "0"
+      ]
+    },
+    "advertiserType": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"business\"",
+        "\"private\""
+      ]
+    },
+    "contactDetails.name": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"Mihaela Mariuta\"",
+        "\"Florentin Bazgan\"",
+        "\"Alexandra Marinescu\""
+      ]
+    },
+    "contactDetails.type": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"agency\"",
+        "\"private\""
+      ]
+    },
+    "contactDetails.phones": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"+40731840533\"]",
+        "[\"+40730783084\"]",
+        "[\"+40756118338\"]"
+      ]
+    },
+    "contactDetails.imageUrl": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null",
+        "string"
+      ],
+      "examples": [
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJmbiI6ImtxOHhvOHF5ZGdidDEtQVJPI...",
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJmbiI6ImluZTBlaWh3bTljMS1BUk8if...",
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJmbiI6IjIzZXJrOW14dGs5aDMtQVJPI..."
+      ]
+    },
+    "contactDetails.hasPhoneNumber": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "true"
+      ]
+    },
+    "creationSource": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"api\"",
+        "\"posting_form\""
+      ]
+    },
+    "developmentUrl": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "exclusiveOffer": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "false"
+      ]
+    },
+    "paginatedUnits.items": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "paginatedUnits.facets.area": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "paginatedUnits.facets.price": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "paginatedUnits.facets.floorNumber": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "paginatedUnits.facets.numberOfRooms": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "paginatedUnits.pagination.page": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "1"
+      ]
+    },
+    "paginatedUnits.pagination.totalPages": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "1"
+      ]
+    },
+    "paginatedUnits.pagination.totalResults": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "0"
+      ]
+    },
+    "topInformation[].unit": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"m²\"",
+        "\"\""
+      ]
+    },
+    "topInformation[].label": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"area\"",
+        "\"construction_status\"",
+        "\"floor\""
+      ]
+    },
+    "topInformation[].values": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"56\"]",
+        "[\"construction_status::ready_to_use\"]",
+        "[\"floor_no::floor_10\", \"/11\"]"
+      ]
+    },
+    "characteristics[].key": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"price\"",
+        "\"m\"",
+        "\"building_type\""
+      ]
+    },
+    "characteristics[].value": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"620\"",
+        "\"56\"",
+        "\"apartment\""
+      ]
+    },
+    "characteristics[].currency": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"EUR\"",
+        "\"\""
+      ]
+    },
+    "characteristics[].localizedValue": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"620 €\"",
+        "\"56 m²\"",
+        "\"\""
+      ]
+    },
+    "totalUnitsCount": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "activeUnitsCount": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "developmentTitle": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "isAiVideoEnabled": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "false"
+      ]
+    },
+    "similarAdsLinkUrl": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "videoThumbnailUrl": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "awaitingUnitsCount": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "featuresByCategory": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "building_floors_num": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"11\"",
+        "\"8\"",
+        "\"1\""
+      ]
+    },
+    "completedUnitsCount": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "moderatedUnitsCount": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "additionalCostsCount": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "additionalInformation[].unit": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "additionalInformation[].label": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"advertiser_type\"",
+        "\"build_year\"",
+        "\"security_types\""
+      ]
+    },
+    "additionalInformation[].values": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"advertiser_type::agency\"]",
+        "[\"2010\"]",
+        "[\"security_types-102::entryphone\", \"security_types-102::monitoring\"]"
+      ]
+    },
+    "featuresWithoutCategory": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "shouldShowExpiredAdPage": {
+      "count": 40,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "env": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"production\""
+      ]
+    },
+    "domain": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"imo\""
+      ]
+    },
+    "locale": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"ro\""
+      ]
+    },
+    "version": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"master-12880\"",
+        "\"master-12903\"",
+        "\"master-12822\""
+      ]
+    },
+    "url_path": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"/oferta/apartament-de-inchiriat-sector-1-aviatorilor-mobilat-5-camere-275689...",
+        "\"/oferta/apartament-de-inchiriat-sector-1-baneasa-2-camere-275705086\"",
+        "\"/oferta/apartament-de-inchiriat-sector-1-pipera-mobilat-3-camere-275666104\""
+      ]
+    },
+    "timestamp": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "1785122733",
+        "1785901030",
+        "1783476891"
+      ]
+    },
+    "user_type": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"seeker\""
+      ]
+    },
+    "ad_storage": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"denied\""
+      ]
+    },
+    "iso_locale": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"ro_RO\""
+      ]
+    },
+    "offer_type": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"apartamente de închiriat\"",
+        "\"garsoniere de închiriat\""
+      ]
+    },
+    "request_id": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"9ea4a2a9c64ad1ab8d5726f32c4c48c7\"",
+        "\"ddbe93981b05509c0aa62ad2aa52e3a9\"",
+        "\"0109eb5ad624e493eca2c3bba361804c\""
+      ]
+    },
+    "route_name": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"ro.listing.detail\""
+      ]
+    },
+    "visitor_id": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "5837195988",
+        "5854996013",
+        "5804090504"
+      ]
+    },
+    "device_type": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"desktop\""
+      ]
+    },
+    "user_status": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"guest\""
+      ]
+    },
+    "ad_user_data": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"denied\""
+      ]
+    },
+    "content_type": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"classified listing\""
+      ]
+    },
+    "search_title": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"Apartament cu 5 camere decomandat, mobilat în Aviatorilor\"",
+        "\"Apartament cu 2 camere decomandat în Băneasa\"",
+        "\"Apartament cu 3 camere decomandat, mobilat în Pipera\""
+      ]
+    },
+    "session_hash": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"809e6510ecfbde6b22171930747a4cbe\"",
+        "\"ad9ae0dd819a8aa99e84e33c36fc9266\"",
+        "\"2d6c8ed9413e8e41286b506785f35522\""
+      ]
+    },
+    "listing_price": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"5000.00\"",
+        "\"750.00\"",
+        "\"1800.00\""
+      ]
+    },
+    "listing_title": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"Amazing 4 bedrooms apartment with terraces | Aviatorilor area\"",
+        "\"Apartamente 2 camere de inchiriat &#34;The Level Apartments 2&#34;\"",
+        "\"Apartament 3 camere Luxury | 130mp | Terasa | Vedere Panoramica\""
+      ]
+    },
+    "listing_status.label": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"Online\""
+      ]
+    },
+    "listing_status.value": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"online\""
+      ]
+    },
+    "listing_currency": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"EUR\"",
+        "\"RON\""
+      ]
+    },
+    "security_storage": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"denied\""
+      ]
+    },
+    "analytics_storage": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"denied\""
+      ]
+    },
+    "user_has_enquired": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "false"
+      ]
+    },
+    "ad_personalization": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"denied\""
+      ]
+    },
+    "onesignal_url_path": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"/oferta/apartament-de-inchiriat-sector-1-aviatorilor-mobilat-5-camere-275689...",
+        "\"/oferta/apartament-de-inchiriat-sector-1-baneasa-2-camere-275705086\"",
+        "\"/oferta/apartament-de-inchiriat-sector-1-pipera-mobilat-3-camere-275666104\""
+      ]
+    },
+    "url_path_with_query": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"/oferta/apartament-de-inchiriat-sector-1-aviatorilor-mobilat-5-camere-275689...",
+        "\"/oferta/apartament-de-inchiriat-sector-1-baneasa-2-camere-275705086\"",
+        "\"/oferta/apartament-de-inchiriat-sector-1-pipera-mobilat-3-camere-275666104\""
+      ]
+    },
+    "user_classification": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"seeker\""
+      ]
+    },
+    "functionality_storage": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"denied\""
+      ]
+    },
+    "onesignal_listing_topic": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"apartments-for-rent\"",
+        "\"studios-for-rent\""
+      ]
+    },
+    "user_has_saved_searches": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "false"
+      ]
+    },
+    "user_remarketing_consent": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"no\""
+      ]
+    },
+    "onesignal_listing_location": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"sector-1\"",
+        "\"sector-4\"",
+        "\"sector-6\""
+      ]
+    },
+    "onesignal_listing_bedroom_tag": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"4-camere\"",
+        "\"2-camere\"",
+        "\"3-camere\""
+      ]
+    },
+    "url_path_with_query_without_utm": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"/oferta/apartament-de-inchiriat-sector-1-aviatorilor-mobilat-5-camere-275689...",
+        "\"/oferta/apartament-de-inchiriat-sector-1-baneasa-2-camere-275705086\"",
+        "\"/oferta/apartament-de-inchiriat-sector-1-pipera-mobilat-3-camere-275666104\""
+      ]
+    },
+    "onesignal_listing_category_offer_tag": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"apartamente-rent\"",
+        "\"garsoniere-rent\""
+      ]
+    },
+    "onesignal_listing_location_level_1_2_tag": {
+      "count": 40,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"bucuresti-sector-1\"",
+        "\"bucuresti-sector-4\"",
+        "\"bucuresti-sector-6\""
+      ]
+    },
+    "location.address.street.name": {
+      "count": 39,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"Soseaua Colentina\"",
+        "\"Strada Avrig\"",
+        "\"Strada Dascalului\""
+      ]
+    },
+    "location.address.street.number": {
+      "count": 39,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "target.Heating": {
+      "count": 38,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"other\"]",
+        "[\"urban\"]",
+        "[\"gas\"]"
+      ]
+    },
+    "target.Extras_types": {
+      "count": 38,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"lift\", \"terrace\", \"air_conditioning\"]",
+        "[\"lift\", \"air_conditioning\", \"separate_kitchen\"]",
+        "[\"lift\", \"balcony\", \"air_conditioning\", \"basement\", \"separate_kitchen\"]"
+      ]
+    },
+    "attributes.heating": {
+      "count": 38,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"other\"",
+        "\"urban\"",
+        "\"gas\""
+      ]
+    },
+    "attributes.extras_types": {
+      "count": 38,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"lift\", \"terrace\", \"air_conditioning\"]",
+        "[\"lift\", \"air_conditioning\", \"separate_kitchen\"]",
+        "[\"lift\", \"balcony\", \"air_conditioning\", \"basement\", \"separate_kitchen\"]"
+      ]
+    },
+    "attributes.equipment_types": {
+      "count": 38,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"furniture\", \"oven\", \"stove\", \"fridge\", \"washing_machine\", \"tv\"]",
+        "[\"furniture\", \"oven\", \"stove\", \"fridge\", \"washing_machine\", \"tv\", \"dishwasher\"]",
+        "[\"furniture\", \"fridge\", \"oven\", \"washing_machine\", \"tv\", \"dishwasher\"]"
+      ]
+    },
+    "agency.id": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "4134121",
+        "5005670",
+        "3971968"
+      ]
+    },
+    "agency.url": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"/ro/companii/agentii/am-imobiliare-ID4134121\"",
+        "\"/ro/companii/agentii/exp-romania-ID5005670\"",
+        "\"/ro/companii/agentii/crosspoint-real-estate-ID3971968\""
+      ]
+    },
+    "agency.name": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"AM Imobiliare \"",
+        "\"EXP Romania\"",
+        "\"Crosspoint Real Estate\""
+      ]
+    },
+    "agency.slug": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"am-imobiliare-ID4134121\"",
+        "\"exp-romania-ID5005670\"",
+        "\"crosspoint-real-estate-ID3971968\""
+      ]
+    },
+    "agency.type": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"agency\""
+      ]
+    },
+    "agency.phones": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"+40731840533\"]",
+        "[\"+40735667838\"]",
+        "[\"+40722640069\"]"
+      ]
+    },
+    "agency.address": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"Marului, 077085, Ilfov\"",
+        "\"Calea Floreasca, Nr 169A, 014459, Bucuresti\"",
+        "\"Gheorghe Titeica nr. 212-214, Et. 3, 020305, Bucuresti\""
+      ]
+    },
+    "agency.imageUrl": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null",
+        "string"
+      ],
+      "examples": [
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV...",
+        "null"
+      ]
+    },
+    "agency.leaderYear": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "agency.hasPhoneNumber": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "true"
+      ]
+    },
+    "agency.highlightedAds": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "agency.brandingVisible": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "true"
+      ]
+    },
+    "agency.enabledFeatures": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"ACADEMY\", \"AD_HOMEPAGE_1_SCHEDULE\", \"ADDITIONAL_CONTACT_FORMS_AD_PAGE\", \"AD..."
+      ]
+    },
+    "target.Build_year": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"2010\"",
+        "\"1980\"",
+        "\"1970\""
+      ]
+    },
+    "target.Security_types": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"entryphone\", \"monitoring\"]",
+        "[\"anti_burglary_door\"]",
+        "[\"anti_burglary_door\", \"entryphone\", \"monitoring\"]"
+      ]
+    },
+    "target.Equipment_types": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"furniture\", \"oven\", \"stove\", \"fridge\", \"washing_machine\", \"tv\"]",
+        "[\"furniture\", \"oven\", \"stove\", \"fridge\", \"washing_machine\", \"tv\", \"dishwasher\"]",
+        "[\"furniture\", \"fridge\", \"oven\", \"washing_machine\", \"tv\", \"dishwasher\"]"
+      ]
+    },
+    "attributes.build_year": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"2010\"",
+        "\"1980\"",
+        "\"1970\""
+      ]
+    },
+    "attributes.security_types": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"entryphone\", \"monitoring\"]",
+        "[\"anti_burglary_door\"]",
+        "[\"anti_burglary_door\", \"entryphone\", \"monitoring\"]"
+      ]
+    },
+    "userAdverts[].url": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"https://www.storia.ro/ro/oferta/ap-2-camere-bloc-finalizat-acte-gata-bucatar...",
+        "\"https://www.storia.ro/ro/oferta/ap-2-camere-tip-studio-bloc-finalizat-loc-pa...",
+        "\"https://www.storia.ro/ro/oferta/ap-2-camere-stefan-cel-mare-pet-friendly-rea..."
+      ]
+    },
+    "userAdverts[].adId": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"10566209\"",
+        "\"10566207\"",
+        "\"10566204\""
+      ]
+    },
+    "userAdverts[].image": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"https://ireland.apollo.olxcdn.com/v1/files/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV..."
+      ]
+    },
+    "userAdverts[].price.unit": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"EUR\"",
+        "\"RON\""
+      ]
+    },
+    "userAdverts[].price.value": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"86600\"",
+        "\"69500\"",
+        "\"550\""
+      ]
+    },
+    "userAdverts[].title": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"AP. 2 CAMERE - BLOC FINALIZAT, ACTE GATA, BUCATARIE INCHISA, COMIS 0%\"",
+        "\"AP. 2 CAMERE - TIP STUDIO, BLOC FINALIZAT, LOC PARCARE, COMISION 0%\"",
+        "\"AP. 2 CAMERE- STEFAN CEL MARE, PET-FRIENDLY, REABILITAT, METROU 5 MIN\""
+      ]
+    },
+    "userAdverts[].netArea": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"63.3\"",
+        "\"48.4\"",
+        "\"53\""
+      ]
+    },
+    "userAdverts[].roomsNum": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "userAdverts[].pricePerM": {
+      "count": 37,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "0"
+      ]
+    },
+    "target.Building_type": {
+      "count": 36,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"apartment\"]",
+        "[\"house\"]",
+        "[\"block\"]"
+      ]
+    },
+    "free_from": {
+      "count": 36,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"2026-08-27\"",
+        "\"2026-09-01\"",
+        "\"2026-09-05\""
+      ]
+    },
+    "attributes.free_from": {
+      "count": 36,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"2026-08-27\"",
+        "\"2026-09-01\"",
+        "\"2026-09-05\""
+      ]
+    },
+    "attributes.building_type": {
+      "count": 36,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"apartment\"",
+        "\"house\"",
+        "\"block\""
+      ]
+    },
+    "building_type": {
+      "count": 36,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "target.Construction_status": {
+      "count": 35,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"ready_to_use\"]"
+      ]
+    },
+    "attributes.construction_status": {
+      "count": 35,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"ready_to_use\""
+      ]
+    },
+    "construction_status": {
+      "count": 35,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "onesignal_listing_condition_tag": {
+      "count": 34,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"established\"",
+        "\"new\""
+      ]
+    },
+    "target.Media_types": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"phone\", \"internet\", \"cable-television\"]",
+        "[\"cable-television\", \"internet\"]",
+        "[\"internet\", \"cable-television\"]"
+      ]
+    },
+    "target.Building_material": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"concrete\"]",
+        "[\"brick\"]"
+      ]
+    },
+    "attributes.media_types": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"phone\", \"internet\", \"cable-television\"]",
+        "[\"cable-television\", \"internet\"]",
+        "[\"internet\", \"cable-television\"]"
+      ]
+    },
+    "attributes.building_material": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"concrete\"",
+        "\"brick\""
+      ]
+    },
+    "enrichment.aiParamsList[].id": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"7805704\"",
+        "\"7805705\"",
+        "\"7805706\""
+      ]
+    },
+    "enrichment.aiParamsList[].key": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"equipment_types\"",
+        "\"construction_status\"",
+        "\"extras_types\""
+      ]
+    },
+    "enrichment.aiParamsList[].value": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"oven\"",
+        "\"fridge\"",
+        "\"furniture\""
+      ]
+    },
+    "enrichment.aiParamsList[].rejected": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "bool"
+      ],
+      "examples": [
+        "false"
+      ]
+    },
+    "enrichment.aiParamsList[].__typename": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"AiParam\""
+      ]
+    },
+    "building_material": {
+      "count": 33,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "target.Windows_type": {
+      "count": 30,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"plastic\"]",
+        "[\"aluminium\"]"
+      ]
+    },
+    "attributes.windows_type": {
+      "count": 30,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"plastic\"",
+        "\"aluminium\""
+      ]
+    },
+    "windows_type": {
+      "count": 30,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "user_ai_search_bucket": {
+      "count": 19,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"not_eligible\"",
+        "\"control\""
+      ]
+    },
+    "target.Divisioning_type": {
+      "count": 15,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"detached\"]",
+        "[\"semidetached\"]"
+      ]
+    },
+    "attributes.divisioning_type": {
+      "count": 15,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"detached\"",
+        "\"semidetached\""
+      ]
+    },
+    "target.Remote_services": {
+      "count": 14,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[\"1\"]"
+      ]
+    },
+    "attributes.remote_services": {
+      "count": 14,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"1\""
+      ]
+    },
+    "remote_services": {
+      "count": 14,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"\""
+      ]
+    },
+    "enrichment": {
+      "count": 7,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "agency.licenseNumber": {
+      "count": 7,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"AGENTIE IMOBILIARA BUCURESTI\""
+      ]
+    },
+    "target.Deposit": {
+      "count": 5,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "900",
+        "1100",
+        "1800"
+      ]
+    },
+    "deposit": {
+      "count": 5,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"900 €\"",
+        "\"1100 €\"",
+        "\"1800 €\""
+      ]
+    },
+    "attributes.posting_form_version": {
+      "count": 5,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"posting_form_1.2\""
+      ]
+    },
+    "target.Rent": {
+      "count": 4,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "450",
+        "1100",
+        "680"
+      ]
+    },
+    "agency": {
+      "count": 3,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "userAdverts": {
+      "count": 3,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "list"
+      ],
+      "examples": [
+        "[]"
+      ]
+    },
+    "attributes.rent_to_students": {
+      "count": 2,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "string"
+      ],
+      "examples": [
+        "\"1\""
+      ]
+    },
+    "location.address.street": {
+      "count": 1,
+      "platforms": [
+        "Storia"
+      ],
+      "types": [
+        "null"
+      ],
+      "examples": [
+        "null"
+      ]
+    },
+    "listing_project_id": {
+      "count": 1,
+      "platforms": [
+        "Imobiliare.ro"
+      ],
+      "types": [
+        "number"
+      ],
+      "examples": [
+        "1451"
+      ]
+    }
+  }
+}

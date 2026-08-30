@@ -32,9 +32,12 @@ class RunFullCrawlDedupTests(unittest.TestCase):
         def fake_collect_page(scraper, search_url, page_num):
             return ["https://www.storia.ro/known", "https://www.storia.ro/new"] if page_num == 1 else []
 
+        # Isolated from the real EXTRA_CITY_SEARCHES config -- this test only
+        # cares about Bucharest sector dedup, not the Cluj/Iași URLs.
         with patch("db_utils.start_crawl_run_log", return_value=1), \
              patch("db_utils.finish_crawl_run_log"), \
              patch.object(crawler._http, "get_proxy", return_value=None), \
+             patch.object(crawler, "EXTRA_CITY_SEARCHES", {}), \
              patch("crawler._collect_page", side_effect=fake_collect_page), \
              patch("crawler._known_urls", return_value={"https://www.storia.ro/known"}), \
              patch("crawler._scrape_and_save", return_value=1) as mock_save:
@@ -49,6 +52,7 @@ class RunFullCrawlDedupTests(unittest.TestCase):
         scraped_urls = mock_save.call_args.args[1]["storia"]
         self.assertEqual(scraped_urls, ["https://www.storia.ro/new"])
         self.assertNotIn("https://www.storia.ro/known", scraped_urls)
+        self.assertEqual(mock_save.call_args.kwargs.get("city"), "Bucuresti")
 
 
 class RunFullCrawlPaginationTests(unittest.TestCase):
@@ -62,6 +66,7 @@ class RunFullCrawlPaginationTests(unittest.TestCase):
         with patch("db_utils.start_crawl_run_log", return_value=1), \
              patch("db_utils.finish_crawl_run_log"), \
              patch.object(crawler._http, "get_proxy", return_value=None), \
+             patch.object(crawler, "EXTRA_CITY_SEARCHES", {}), \
              patch("crawler._collect_page", side_effect=fake_collect_page), \
              patch("crawler._known_urls", return_value=set()), \
              patch("crawler._scrape_and_save", return_value=1):
@@ -88,6 +93,7 @@ class RunIncrementalCrawlEarlyExitTests(unittest.TestCase):
         with patch("db_utils.start_crawl_run_log", return_value=1), \
              patch("db_utils.finish_crawl_run_log"), \
              patch.object(crawler._http, "get_proxy", return_value=None), \
+             patch.object(crawler, "EXTRA_CITY_SEARCHES", {}), \
              patch("crawler._collect_page", side_effect=fake_collect_page), \
              patch("crawler._known_urls",
                    return_value={"https://www.storia.ro/a", "https://www.storia.ro/b"}), \
@@ -109,8 +115,8 @@ class RunAvailabilityCheckPlatformDispatchTests(unittest.TestCase):
         olx_scraper = MagicMock()
         storia_scraper = MagicMock()
         fake_listings = [
-            {"platform_id": "olx", "url": "https://olx.example/a"},
-            {"platform_id": "storia", "url": "https://storia.example/a"},
+            {"platform_id": "olx", "url": "https://olx.example/a", "city": "Bucuresti"},
+            {"platform_id": "storia", "url": "https://storia.example/a", "city": "Bucuresti"},
         ]
 
         with patch("db_utils.start_availability_check_log", return_value=1), \
@@ -123,8 +129,57 @@ class RunAvailabilityCheckPlatformDispatchTests(unittest.TestCase):
 
             crawler.run_availability_check(platforms=["olx"])
 
-        olx_scraper.scrape_listing_with_status.assert_called_once_with("https://olx.example/a")
+        olx_scraper.scrape_listing_with_status.assert_called_once_with(
+            "https://olx.example/a", city="Bucuresti"
+        )
         storia_scraper.scrape_batch.assert_not_called()
+
+    def test_non_bucharest_row_city_is_passed_through_to_olx_recheck(self):
+        """A Cluj/Iași row being rechecked must not silently default to
+        "Bucuresti" -- that would make scrape_listing_with_status run
+        Bucharest-only title district matching against a non-Bucharest
+        listing (see scrapers/olx.py's city-gated _extract_district_from_title)."""
+        olx_scraper = MagicMock()
+        fake_listings = [
+            {"platform_id": "olx", "url": "https://olx.example/cluj-a", "city": "Cluj-Napoca"},
+        ]
+
+        with patch("db_utils.start_availability_check_log", return_value=1), \
+             patch("db_utils.get_listings_for_availability_check", return_value=fake_listings), \
+             patch("db_utils.batch_update_availability"), \
+             patch("db_utils.save_to_db"), \
+             patch("db_utils.finish_availability_check_log"), \
+             patch.object(crawler, "SCRAPERS", {"olx": olx_scraper}), \
+             patch("crawler.time.sleep"):
+
+            crawler.run_availability_check(platforms=["olx"])
+
+        olx_scraper.scrape_listing_with_status.assert_called_once_with(
+            "https://olx.example/cluj-a", city="Cluj-Napoca"
+        )
+
+    def test_row_missing_city_falls_back_to_bucuresti(self):
+        """Rows predating the city backfill (or any gap in it) must not crash
+        the recheck -- fall back to the same "Bucuresti" default scrape_listing_with_status
+        already uses, rather than passing None through."""
+        olx_scraper = MagicMock()
+        fake_listings = [
+            {"platform_id": "olx", "url": "https://olx.example/legacy"},
+        ]
+
+        with patch("db_utils.start_availability_check_log", return_value=1), \
+             patch("db_utils.get_listings_for_availability_check", return_value=fake_listings), \
+             patch("db_utils.batch_update_availability"), \
+             patch("db_utils.save_to_db"), \
+             patch("db_utils.finish_availability_check_log"), \
+             patch.object(crawler, "SCRAPERS", {"olx": olx_scraper}), \
+             patch("crawler.time.sleep"):
+
+            crawler.run_availability_check(platforms=["olx"])
+
+        olx_scraper.scrape_listing_with_status.assert_called_once_with(
+            "https://olx.example/legacy", city="Bucuresti"
+        )
 
 
 if __name__ == "__main__":
