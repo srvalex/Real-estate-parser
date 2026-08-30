@@ -7,8 +7,14 @@ export interface SearchParams {
   nearbyZones: string[];
   hardFilters: HardFilters;
   vibe: string;
+  templatePhotos?: string[];
   page?: number;
   pageSize?: number;
+}
+
+export interface TemplatePhotoMeta {
+  id: string;
+  label: string;
 }
 
 export interface SearchResponse {
@@ -31,6 +37,9 @@ function buildQuery(params: SearchParams): string {
   if (params.hardFilters.maxSqm > 0) q.set("max_sqm", String(params.hardFilters.maxSqm));
   if (params.hardFilters.propertyTypes.length > 0) q.set("property_types", params.hardFilters.propertyTypes.join(","));
   if (params.vibe.trim()) q.set("vibe", params.vibe.trim());
+  if (params.templatePhotos && params.templatePhotos.length > 0) {
+    q.set("template_photos", params.templatePhotos.join(","));
+  }
   q.set("page", String(params.page ?? 1));
   q.set("page_size", String(params.pageSize ?? 60));
   return q.toString();

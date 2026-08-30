@@ -183,6 +183,82 @@ class VibeRankingGatingTests(unittest.TestCase):
         self.assertTrue(body["embedding_sorted"])
         self.assertEqual(body["results"][0]["url"], "https://example.com/b")
         self.assertIsNotNone(body["results"][0]["matchScore"])
+        # text-only search: no image channel ran, so imageSimilarity stays null
+        self.assertIsNone(body["results"][0]["imageSimilarity"])
+        self.assertIsNotNone(body["results"][0]["textSimilarity"])
+
+
+class TemplatePhotoSearchTests(unittest.TestCase):
+    def test_no_template_photos_never_looks_up_an_embedding_or_runs_image_search(self):
+        p1, p2, p3 = _patch_db()
+        with p1, p2, p3, \
+             patch("api.main.get_combined_embedding") as mock_combine, \
+             patch("api.main.db_utils.search_by_image_embedding") as mock_image_search:
+            client.get("/listings/search", params={"districts": "Dristor,Obor"})
+        mock_combine.assert_not_called()
+        mock_image_search.assert_not_called()
+
+    def test_template_photos_present_runs_image_search_without_vibe_text(self):
+        p1, p2, p3 = _patch_db()
+        fake_embedding = [0.3] * 512
+        with p1, p2, p3, \
+             patch("api.main.get_combined_embedding", return_value=fake_embedding) as mock_combine, \
+             patch("api.main.embed_query") as mock_text_embed, \
+             patch(
+                 "api.main.db_utils.search_by_image_embedding",
+                 return_value={"https://example.com/a": 0.7},
+             ) as mock_image_search:
+            resp = client.get(
+                "/listings/search",
+                params={"districts": "Dristor,Obor", "template_photos": "template_1"},
+            )
+        mock_combine.assert_called_once_with(["template_1"])
+        mock_text_embed.assert_not_called()
+        mock_image_search.assert_called_once()
+        called_embedding = mock_image_search.call_args.args[0]
+        self.assertEqual(called_embedding, fake_embedding)
+
+        body = resp.json()
+        self.assertTrue(body["embedding_sorted"])
+        result_a = next(r for r in body["results"] if r["url"] == "https://example.com/a")
+        self.assertIsNotNone(result_a["imageSimilarity"])
+        self.assertIsNone(result_a["textSimilarity"])
+        self.assertEqual(body["applied_filters"]["template_photos"]["value"], ["template_1"])
+
+    def test_multiple_template_photos_forwarded_as_a_list(self):
+        p1, p2, p3 = _patch_db()
+        with p1, p2, p3, \
+             patch("api.main.get_combined_embedding", return_value=[0.1] * 512) as mock_combine, \
+             patch("api.main.db_utils.search_by_image_embedding", return_value={}):
+            client.get(
+                "/listings/search",
+                params={"districts": "Dristor,Obor", "template_photos": "template_1,template_3"},
+            )
+        mock_combine.assert_called_once_with(["template_1", "template_3"])
+
+    def test_vibe_and_template_photos_together_run_both_channels(self):
+        p1, p2, p3 = _patch_db()
+        with p1, p2, p3, \
+             patch("api.main.get_combined_embedding", return_value=[0.2] * 512), \
+             patch("api.main.embed_query", return_value=[0.1] * 384), \
+             patch("api.main.db_utils.search_by_text_vibe", return_value={"https://example.com/a": 0.5}), \
+             patch("api.main.db_utils.search_by_image_embedding", return_value={"https://example.com/b": 0.9}):
+            resp = client.get(
+                "/listings/search",
+                params={"districts": "Dristor,Obor", "vibe": "luminos", "template_photos": "template_2"},
+            )
+        body = resp.json()
+        results = {r["url"]: r for r in body["results"]}
+        self.assertIsNotNone(results["https://example.com/a"]["textSimilarity"])
+        self.assertIsNotNone(results["https://example.com/b"]["imageSimilarity"])
+
+
+class TemplatePhotoListEndpointTests(unittest.TestCase):
+    def test_returns_the_four_known_photos(self):
+        resp = client.get("/template-photos")
+        self.assertEqual(resp.status_code, 200)
+        ids = [p["id"] for p in resp.json()]
+        self.assertEqual(ids, ["template_1", "template_2", "template_3", "template_4"])
 
 
 class PaginationTests(unittest.TestCase):

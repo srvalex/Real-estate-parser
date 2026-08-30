@@ -40,6 +40,7 @@ function wait(ms: number) {
 export function SearchExperience() {
   const [hardFilters, setHardFilters] = useState<HardFilters>(DEFAULT_HARD_FILTERS);
   const [vibe, setVibe] = useState("");
+  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
   const [zones, setZones] = useState<string[]>([]);
   const [includeProximity, setIncludeProximity] = useState(false);
   const [zoneError, setZoneError] = useState<string | null>(null);
@@ -82,6 +83,7 @@ export function SearchExperience() {
         nearbyZones: includeProximity ? proximityExtra : [],
         hardFilters,
         vibe,
+        templatePhotos: selectedPhotos,
       });
 
       const scored: ScoredListing[] = data.results.map((listing) => ({
@@ -193,6 +195,8 @@ export function SearchExperience() {
                   value={vibe}
                   onChange={setVibe}
                   detected={liveVibeFilters}
+                  selectedPhotos={selectedPhotos}
+                  onChangePhotos={setSelectedPhotos}
                   onSubmit={stage === "idle" ? handleSearch : undefined}
                 />
               </div>
@@ -273,7 +277,7 @@ export function SearchExperience() {
               totalCount={results.length + hiddenUrls.size}
               sort={sort}
               onSortChange={setSort}
-              relevanceAvailable={vibe.trim().length > 0}
+              relevanceAvailable={vibe.trim().length > 0 || selectedPhotos.length > 0}
             />
 
             <div className="mx-auto max-w-6xl space-y-4 px-4 py-5">

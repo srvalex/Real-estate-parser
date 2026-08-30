@@ -33,7 +33,8 @@ export function MatchReceipt({
 }) {
   const requestedKeys = Object.keys(requestedFilters) as VibeFilterKey[];
   const matchedSet = new Set(listing.matchedFilters);
-  const hasVibeQuery = requestedKeys.length > 0 || listing.textSimilarity !== null;
+  const hasVibeQuery =
+    requestedKeys.length > 0 || listing.textSimilarity !== null || listing.imageSimilarity !== null;
 
   if (!hasVibeQuery && listing.priceFairnessPct === null) return null;
 
@@ -82,6 +83,21 @@ export function MatchReceipt({
                   <div
                     className="h-full rounded-pill bg-brick"
                     style={{ width: `${Math.round(listing.textSimilarity * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {listing.imageSimilarity !== null && (
+              <div className="py-1.5">
+                <div className="mb-1 flex items-center justify-between font-mono text-[0.68rem] text-concrete">
+                  <span>potrivire vizuală</span>
+                  <span>{Math.round(listing.imageSimilarity * 100)}%</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-pill bg-concrete/20">
+                  <div
+                    className="h-full rounded-pill bg-pine"
+                    style={{ width: `${Math.round(listing.imageSimilarity * 100)}%` }}
                   />
                 </div>
               </div>

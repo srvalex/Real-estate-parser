@@ -72,3 +72,10 @@ class EventIn(BaseModel):
 
 class EventOut(BaseModel):
     logged: bool
+
+
+class TemplatePhotoOut(BaseModel):
+    """One of the 4 curated visual-style reference photos (api/template_photos.py),
+    for GET /template-photos and the /listings/search `template_photos` param."""
+    id: str
+    label: str

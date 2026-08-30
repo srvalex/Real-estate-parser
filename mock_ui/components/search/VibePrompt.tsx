@@ -1,8 +1,10 @@
 "use client";
 
-import { Search, Sparkles } from "lucide-react";
+import { Check, Search, Sparkles } from "lucide-react";
+import clsx from "clsx";
 import type { VibeFilters } from "@/lib/types";
 import { formatVibeFilterValue, VIBE_FILTER_LABELS } from "@/lib/nlpFilters";
+import { TEMPLATE_PHOTOS } from "@/lib/templatePhotos";
 
 const SUGGESTIONS = [
   "luminos, aproape de metrou",
@@ -15,17 +17,25 @@ export function VibePrompt({
   value,
   onChange,
   detected,
+  selectedPhotos,
+  onChangePhotos,
   onSubmit,
 }: {
   value: string;
   onChange: (v: string) => void;
   detected: VibeFilters;
+  selectedPhotos: string[];
+  onChangePhotos: (ids: string[]) => void;
   onSubmit?: () => void;
 }) {
   const detectedKeys = Object.keys(detected) as (keyof VibeFilters)[];
 
   function addSuggestion(s: string) {
     onChange(value.trim() ? `${value.trim()}, ${s}` : s);
+  }
+
+  function togglePhoto(id: string) {
+    onChangePhotos(selectedPhotos.includes(id) ? selectedPhotos.filter((p) => p !== id) : [...selectedPhotos, id]);
   }
 
   return (
@@ -79,6 +89,45 @@ export function VibePrompt({
             ))}
           </div>
         )}
+
+        <div className="mt-4 border-t border-concrete/15 pt-4">
+          <p className="mb-1 text-xs font-medium text-ink">Aspect vizual (opțional)</p>
+          <p className="mb-2.5 text-xs text-concrete">
+            Alege una sau mai multe fotografii de referință — ordonăm și după similaritate vizuală.
+          </p>
+          <div className="grid grid-cols-4 gap-2">
+            {TEMPLATE_PHOTOS.map((photo) => {
+              const isSelected = selectedPhotos.includes(photo.id);
+              return (
+                <button
+                  key={photo.id}
+                  type="button"
+                  onClick={() => togglePhoto(photo.id)}
+                  aria-pressed={isSelected}
+                  className={clsx(
+                    "group relative overflow-hidden rounded-sm border-2 transition-colors",
+                    isSelected ? "border-brick" : "border-transparent hover:border-concrete/40"
+                  )}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/template-photos/${photo.file}`}
+                    alt={photo.label}
+                    className="aspect-square w-full object-cover"
+                  />
+                  {isSelected && (
+                    <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-brick text-paper">
+                      <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                    </span>
+                  )}
+                  <span className="absolute inset-x-0 bottom-0 bg-ink/70 px-1 py-0.5 text-center text-[0.62rem] leading-tight text-paper">
+                    {photo.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {onSubmit && (

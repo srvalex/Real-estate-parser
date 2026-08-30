@@ -30,7 +30,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import db_utils
 import pipeline_core
 from api.locations import sector_for
-from api.schemas import EventIn, EventOut, SearchResponse
+from api.schemas import EventIn, EventOut, SearchResponse, TemplatePhotoOut
+from api.template_photos import get_combined_embedding, list_template_photos
 from embedding import embed_query
 
 app = FastAPI(title="Real Estate Search API")
@@ -98,6 +99,9 @@ def search_listings(
     max_sqm: Optional[float] = Query(None, ge=0),
     property_types: Optional[str] = Query(None, description="Comma-separated"),
     vibe: Optional[str] = Query(None),
+    template_photos: Optional[str] = Query(
+        None, description="Comma-separated template photo ids (template_1..template_4) for visual-similarity search"
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
 ):
@@ -107,6 +111,8 @@ def search_listings(
         raise HTTPException(status_code=422, detail="districts must be a non-empty comma-separated list")
 
     property_type_list = _split_csv(property_types)
+    template_photo_ids = _split_csv(template_photos)
+    image_embedding = get_combined_embedding(template_photo_ids) if template_photo_ids else None
     nearby_set = set(nearby_zones)
     # dedup while keeping a stable order; nearby zones only ever add rows,
     # never narrow the core selection
@@ -130,6 +136,8 @@ def search_listings(
         applied_filters["property_types"] = {"value": property_type_list, "source": "user"}
     if vibe:
         applied_filters["vibe"] = {"value": vibe, "source": "user"}
+    if template_photo_ids:
+        applied_filters["template_photos"] = {"value": template_photo_ids, "source": "user"}
 
     embedding_sorted = False
     embed_error = None
@@ -147,9 +155,9 @@ def search_listings(
         price_stats = db_utils.get_price_stats()  # not cached at this layer, see MIGRATION_PLAN.md Phase 1
         df = pipeline_core.apply_price_fairness(df, price_stats=price_stats)
 
-        if vibe and vibe.strip():
+        if (vibe and vibe.strip()) or image_embedding:
             df, embedding_sorted, embed_error = pipeline_core.apply_ai_scores(
-                df, vibe, url_col="url", embed_query=embed_query,
+                df, vibe or "", url_col="url", embed_query=embed_query, image_embedding=image_embedding,
             )
 
     total_count = len(df)
@@ -157,6 +165,8 @@ def search_listings(
     page_df = df.iloc[start : start + page_size] if not df.empty else df
 
     has_score_col = "_similarity_score" in page_df.columns
+    has_text_score_col = "_text_similarity" in page_df.columns
+    has_image_score_col = "_image_similarity" in page_df.columns
 
     results = []
     for _, row in page_df.iterrows():
@@ -180,8 +190,8 @@ def search_listings(
             "features": _parse_list_field(row.get("features")),
             "image_urls": _parse_list_field(row.get("image_urls")),
             "matchScore": _clean(row.get("_similarity_score")) if has_score_col else None,
-            "textSimilarity": _clean(row.get("_similarity_score")) if has_score_col else None,
-            "imageSimilarity": None,
+            "textSimilarity": _clean(row.get("_text_similarity")) if has_text_score_col else None,
+            "imageSimilarity": _clean(row.get("_image_similarity")) if has_image_score_col else None,
             "priceFairnessPct": _clean(row.get("price_fairness_pct")),
             "matchedFilters": [],
             "isNearbyZone": district in nearby_set and district not in core_zones,
@@ -209,6 +219,11 @@ def search_listings(
         "embedding_sorted": embedding_sorted,
         "embed_error": embed_error,
     }
+
+
+@app.get("/template-photos", response_model=list[TemplatePhotoOut])
+def get_template_photos():
+    return list_template_photos()
 
 
 @app.post("/events", response_model=EventOut)
