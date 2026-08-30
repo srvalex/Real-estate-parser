@@ -1,10 +1,12 @@
 "use client";
 
-import { Check, Search, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { Check, ChevronDown, Search, SlidersHorizontal, Sparkles } from "lucide-react";
 import clsx from "clsx";
-import type { VibeFilters } from "@/lib/types";
+import type { HardFilters, VibeFilters } from "@/lib/types";
 import { formatVibeFilterValue, VIBE_FILTER_LABELS } from "@/lib/nlpFilters";
 import { TEMPLATE_PHOTOS } from "@/lib/templatePhotos";
+import { HardFiltersPanel } from "./HardFiltersPanel";
 
 const SUGGESTIONS = [
   "luminos, aproape de metrou",
@@ -19,6 +21,10 @@ export function VibePrompt({
   detected,
   selectedPhotos,
   onChangePhotos,
+  hardFilters,
+  onChangeHardFilters,
+  autoFilledFields,
+  hardFilterSummary,
   onSubmit,
 }: {
   value: string;
@@ -26,9 +32,15 @@ export function VibePrompt({
   detected: VibeFilters;
   selectedPhotos: string[];
   onChangePhotos: (ids: string[]) => void;
+  hardFilters: HardFilters;
+  onChangeHardFilters: (next: HardFilters) => void;
+  autoFilledFields: Set<string>;
+  hardFilterSummary: string[];
   onSubmit?: () => void;
 }) {
   const detectedKeys = Object.keys(detected) as (keyof VibeFilters)[];
+  const [photosOpen, setPhotosOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(true);
 
   function addSuggestion(s: string) {
     onChange(value.trim() ? `${value.trim()}, ${s}` : s);
@@ -91,42 +103,94 @@ export function VibePrompt({
         )}
 
         <div className="mt-4 border-t border-concrete/15 pt-4">
-          <p className="mb-1 text-xs font-medium text-ink">Aspect vizual (opțional)</p>
-          <p className="mb-2.5 text-xs text-concrete">
-            Alege una sau mai multe fotografii de referință — ordonăm și după similaritate vizuală.
-          </p>
-          <div className="grid grid-cols-4 gap-2">
-            {TEMPLATE_PHOTOS.map((photo) => {
-              const isSelected = selectedPhotos.includes(photo.id);
-              return (
-                <button
-                  key={photo.id}
-                  type="button"
-                  onClick={() => togglePhoto(photo.id)}
-                  aria-pressed={isSelected}
-                  className={clsx(
-                    "group relative overflow-hidden rounded-sm border-2 transition-colors",
-                    isSelected ? "border-brick" : "border-transparent hover:border-concrete/40"
-                  )}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`/template-photos/${photo.file}`}
-                    alt={photo.label}
-                    className="aspect-square w-full object-cover"
-                  />
-                  {isSelected && (
-                    <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-brick text-paper">
-                      <Check className="h-2.5 w-2.5" strokeWidth={3} />
-                    </span>
-                  )}
-                  <span className="absolute inset-x-0 bottom-0 bg-ink/70 px-1 py-0.5 text-center text-[0.62rem] leading-tight text-paper">
-                    {photo.label}
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((o) => !o)}
+            aria-expanded={filtersOpen}
+            className="flex w-full items-center justify-between gap-2 text-left"
+          >
+            <span className="flex items-center gap-1.5 text-xs font-medium text-ink">
+              <SlidersHorizontal className="h-3.5 w-3.5 text-concrete" />
+              Filtre exacte
+              <span className="font-mono text-[0.65rem] font-normal text-concrete">(cameră, preț, suprafață)</span>
+            </span>
+            <span className="flex items-center gap-2">
+              {!filtersOpen &&
+                hardFilterSummary.map((s) => (
+                  <span key={s} className="hidden font-mono text-[0.65rem] text-brick sm:inline">
+                    {s}
                   </span>
-                </button>
-              );
-            })}
-          </div>
+                ))}
+              <ChevronDown
+                className={clsx("h-4 w-4 shrink-0 text-concrete transition-transform", filtersOpen && "rotate-180")}
+              />
+            </span>
+          </button>
+          {filtersOpen && (
+            <div className="mt-3">
+              <HardFiltersPanel value={hardFilters} onChange={onChangeHardFilters} autoFilledFields={autoFilledFields} bare />
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 border-t border-concrete/15 pt-4">
+          <button
+            type="button"
+            onClick={() => setPhotosOpen((o) => !o)}
+            aria-expanded={photosOpen}
+            className="flex w-full items-center justify-between gap-2 text-left"
+          >
+            <span>
+              <p className="text-xs font-medium text-ink">
+                Aspect vizual (opțional)
+                {selectedPhotos.length > 0 && (
+                  <span className="ml-1.5 font-mono text-[0.65rem] font-normal text-brick">
+                    {selectedPhotos.length} selectate
+                  </span>
+                )}
+              </p>
+              <p className="mt-0.5 text-xs text-concrete">
+                Alege una sau mai multe fotografii de referință — ordonăm și după similaritate vizuală.
+              </p>
+            </span>
+            <ChevronDown
+              className={clsx("h-4 w-4 shrink-0 text-concrete transition-transform", photosOpen && "rotate-180")}
+            />
+          </button>
+          {photosOpen && (
+            <div className="mt-2.5 grid grid-cols-4 gap-2">
+              {TEMPLATE_PHOTOS.map((photo) => {
+                const isSelected = selectedPhotos.includes(photo.id);
+                return (
+                  <button
+                    key={photo.id}
+                    type="button"
+                    onClick={() => togglePhoto(photo.id)}
+                    aria-pressed={isSelected}
+                    className={clsx(
+                      "group relative overflow-hidden rounded-sm border-2 transition-colors",
+                      isSelected ? "border-brick" : "border-transparent hover:border-concrete/40"
+                    )}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/template-photos/${photo.file}`}
+                      alt={photo.label}
+                      className="aspect-square w-full object-cover"
+                    />
+                    {isSelected && (
+                      <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-brick text-paper">
+                        <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                      </span>
+                    )}
+                    <span className="absolute inset-x-0 bottom-0 bg-ink/70 px-1 py-0.5 text-center text-[0.62rem] leading-tight text-paper">
+                      {photo.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 

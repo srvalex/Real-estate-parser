@@ -1,25 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { AnimatePresence, motion, MotionConfig } from "framer-motion";
-import { ChevronDown, SlidersHorizontal } from "lucide-react";
-import clsx from "clsx";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { motion, MotionConfig } from "framer-motion";
 import { Hero } from "./Hero";
-import { HardFiltersPanel } from "./HardFiltersPanel";
 import { VibePrompt } from "./VibePrompt";
 import { ZoneSelector } from "./ZoneSelector";
-import { StatusStepper, type PipelineStage } from "@/components/results/StatusStepper";
-import { ResultsToolbar, type SortMode } from "@/components/results/ResultsToolbar";
-import { ListingCard } from "@/components/results/ListingCard";
-import { SkeletonCard } from "@/components/results/SkeletonCard";
-import { EmptyState } from "@/components/results/EmptyState";
-import { PartialFailureBanner } from "@/components/results/PartialFailureBanner";
-import { getLocations } from "@/lib/locations";
+import { getLocations, toApiCity, toDisplayCity } from "@/lib/locations";
 import { expandWithProximity } from "@/lib/zones";
 import { extractVibeFilters } from "@/lib/nlpFilters";
-import { matchedVibeFilters } from "@/lib/matching";
-import { searchListings } from "@/lib/api";
-import type { HardFilters, ScoredListing, VibeFilters } from "@/lib/types";
+import { buildQuery, hardFiltersFromQuery } from "@/lib/api";
+import type { HardFilters } from "@/lib/types";
 
 const LOCATIONS = getLocations();
 
@@ -31,109 +22,115 @@ const DEFAULT_HARD_FILTERS: HardFilters = {
   propertyTypes: [],
 };
 
-type Stage = "idle" | "pipeline" | "results";
-
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export function SearchExperience() {
-  const [hardFilters, setHardFilters] = useState<HardFilters>(DEFAULT_HARD_FILTERS);
-  const [vibe, setVibe] = useState("");
-  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
-  const [zones, setZones] = useState<string[]>([]);
-  const [includeProximity, setIncludeProximity] = useState(false);
+  const router = useRouter();
+  const incomingParams = useSearchParams();
+
+  // A /results search can link back here via "Căutare nouă" — rehydrate
+  // the form from that URL so going back doesn't throw away what was
+  // just searched. Read once, at mount, from whatever query string this
+  // page was opened with; the form is uncontrolled by the URL afterwards.
+  const [hardFilters, setHardFilters] = useState<HardFilters>(() =>
+    incomingParams.toString() ? hardFiltersFromQuery(incomingParams) : DEFAULT_HARD_FILTERS
+  );
+  const [vibe, setVibe] = useState(() => incomingParams.get("vibe") ?? "");
+  const [selectedPhotos, setSelectedPhotos] = useState<string[]>(() => {
+    const raw = incomingParams.get("template_photos");
+    return raw ? raw.split(",").filter(Boolean) : [];
+  });
+  const [selectedCity, setSelectedCity] = useState<string | null>(() => {
+    const city = incomingParams.get("city");
+    return city ? toDisplayCity(city) : null;
+  });
+  const [zones, setZones] = useState<string[]>(() => {
+    const raw = incomingParams.get("districts");
+    return raw ? raw.split(",").filter(Boolean) : [];
+  });
+  const [includeProximity, setIncludeProximity] = useState(() => Boolean(incomingParams.get("nearby_districts")));
   const [zoneError, setZoneError] = useState<string | null>(null);
 
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const [stage, setStage] = useState<Stage>("idle");
-  const [pipelineStage, setPipelineStage] = useState<PipelineStage>("reading");
-  const [embedError, setEmbedError] = useState<string | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  const [touchedHardFilters, setTouchedHardFilters] = useState<Set<string>>(new Set());
 
-  const [results, setResults] = useState<ScoredListing[]>([]);
-  const [vibeFiltersUsed, setVibeFiltersUsed] = useState<VibeFilters>({});
-  const [hiddenUrls, setHiddenUrls] = useState<Set<string>>(new Set());
-  const [boostDistricts, setBoostDistricts] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<SortMode>("newest");
+  // No separate "Tot orașul" toggle — a city selected with zero
+  // neighbourhoods picked just means "search the whole city".
+  const wholeCity = zones.length === 0;
 
   const liveVibeFilters = useMemo(() => extractVibeFilters(vibe), [vibe]);
   const proximityExtra = useMemo(() => (zones.length ? expandWithProximity(zones) : []), [zones]);
 
-  async function handleSearch() {
-    if (zones.length === 0) {
-      setZoneError("Selectează cel puțin o zonă de căutare.");
-      return;
-    }
-    setZoneError(null);
-    setSearchError(null);
-    setHiddenUrls(new Set());
-    setBoostDistricts(new Set());
-
-    setStage("pipeline");
-    setPipelineStage("reading");
-    await wait(200);
-    setPipelineStage("searching");
-
-    const vibeFilters = extractVibeFilters(vibe);
-
-    try {
-      const data = await searchListings({
-        zones,
-        nearbyZones: includeProximity ? proximityExtra : [],
-        hardFilters,
-        vibe,
-        templatePhotos: selectedPhotos,
-      });
-
-      const scored: ScoredListing[] = data.results.map((listing) => ({
-        ...listing,
-        matchedFilters: matchedVibeFilters(listing, vibeFilters),
-      }));
-
-      setResults(scored);
-      setVibeFiltersUsed(vibeFilters);
-      setEmbedError(data.embed_error);
-      setSort(data.embedding_sorted ? "relevance" : "newest");
-    } catch (e) {
-      setResults([]);
-      setSearchError(e instanceof Error ? e.message : "Căutarea a eșuat.");
-    }
-
-    setStage("results");
+  // Tri-state auto-fill (unset / user-set / vibe-inferred), same principle
+  // documented in MIGRATION_PLAN.md for the future agent backfill: only
+  // fields the user hasn't touched are eligible to be filled from the
+  // free-text prompt, and a field they explicitly set (including via an
+  // EmptyState "relax this filter" action) never gets silently overwritten
+  // again just because the vibe text still mentions it.
+  function handleHardFiltersChange(next: HardFilters) {
+    setTouchedHardFilters((prev) => {
+      const touched = new Set(prev);
+      if (next.rooms !== hardFilters.rooms) touched.add("rooms");
+      if (next.maxPrice !== hardFilters.maxPrice) touched.add("maxPrice");
+      if (next.minSqm !== hardFilters.minSqm) touched.add("minSqm");
+      if (next.maxSqm !== hardFilters.maxSqm) touched.add("maxSqm");
+      if (next.propertyTypes.join(",") !== hardFilters.propertyTypes.join(",")) touched.add("propertyTypes");
+      return touched;
+    });
+    setHardFilters(next);
   }
 
-  function handleBack() {
-    setStage("idle");
-  }
+  useEffect(() => {
+    setHardFilters((prev) => {
+      const next = { ...prev };
+      let changed = false;
 
-  function handleHide(url: string) {
-    setHiddenUrls((prev) => new Set(prev).add(url));
-  }
+      if (!touchedHardFilters.has("rooms")) {
+        const detected = (liveVibeFilters.ROOM_COUNT as HardFilters["rooms"]) ?? "Orice";
+        if (next.rooms !== detected) {
+          next.rooms = detected;
+          changed = true;
+        }
+      }
+      if (!touchedHardFilters.has("propertyTypes")) {
+        const detected = liveVibeFilters.PROPERTY_TYPE ? [liveVibeFilters.PROPERTY_TYPE as HardFilters["propertyTypes"][number]] : [];
+        if (next.propertyTypes.join(",") !== detected.join(",")) {
+          next.propertyTypes = detected;
+          changed = true;
+        }
+      }
+      if (!touchedHardFilters.has("maxPrice")) {
+        const detected = (liveVibeFilters.PRICE_MAX as number) ?? 0;
+        if (next.maxPrice !== detected) {
+          next.maxPrice = detected;
+          changed = true;
+        }
+      }
+      if (!touchedHardFilters.has("minSqm")) {
+        const detected = (liveVibeFilters.AREA_MIN as number) ?? 0;
+        if (next.minSqm !== detected) {
+          next.minSqm = detected;
+          changed = true;
+        }
+      }
+      if (!touchedHardFilters.has("maxSqm")) {
+        const detected = (liveVibeFilters.AREA_MAX as number) ?? 0;
+        if (next.maxSqm !== detected) {
+          next.maxSqm = detected;
+          changed = true;
+        }
+      }
 
-  function handleMoreLikeThis(listing: ScoredListing) {
-    setBoostDistricts((prev) => new Set(prev).add(listing.district));
-  }
+      return changed ? next : prev;
+    });
+  }, [liveVibeFilters, touchedHardFilters]);
 
-  const displayList = useMemo(() => {
-    let list = results.filter((r) => !hiddenUrls.has(r.url));
-    if (boostDistricts.size > 0) {
-      list = list.map((r) =>
-        boostDistricts.has(r.district) && r.matchScore !== null
-          ? { ...r, matchScore: Math.min(1, r.matchScore + 0.12) }
-          : r
-      );
-    }
-    const sorted = [...list];
-    if (sort === "relevance") {
-      sorted.sort((a, b) => (b.matchScore ?? -1) - (a.matchScore ?? -1));
-    } else if (sort === "price") {
-      sorted.sort((a, b) => a.price_numeric - b.price_numeric);
-    } else {
-      sorted.sort((a, b) => Date.parse(b.scraped_at) - Date.parse(a.scraped_at));
-    }
-    return sorted;
-  }, [results, hiddenUrls, boostDistricts, sort]);
+  const autoFilledFields = useMemo(() => {
+    const s = new Set<string>();
+    if (!touchedHardFilters.has("rooms") && hardFilters.rooms !== "Orice") s.add("rooms");
+    if (!touchedHardFilters.has("propertyTypes") && hardFilters.propertyTypes.length > 0) s.add("propertyTypes");
+    if (!touchedHardFilters.has("maxPrice") && hardFilters.maxPrice > 0) s.add("maxPrice");
+    if (!touchedHardFilters.has("minSqm") && hardFilters.minSqm > 0) s.add("minSqm");
+    if (!touchedHardFilters.has("maxSqm") && hardFilters.maxSqm > 0) s.add("maxSqm");
+    return s;
+  }, [touchedHardFilters, hardFilters]);
 
   const hardFilterSummary = useMemo(() => {
     const parts: string[] = [];
@@ -146,174 +143,65 @@ export function SearchExperience() {
     return parts;
   }, [hardFilters]);
 
-  const emptySuggestion = useMemo(() => {
-    if (displayList.length > 0 || searchError) return null;
-    if (hardFilters.maxPrice > 0) {
-      return {
-        message: `Niciun anunț sub ${hardFilters.maxPrice} €. Încearcă să ridici pragul de preț.`,
-        actionLabel: "Elimină pragul de preț",
-        onRelax: () => setHardFilters((f) => ({ ...f, maxPrice: 0 })),
-      };
+  function handleSearch() {
+    if (!selectedCity) {
+      setZoneError("Selectează un oraș sau o zonă de căutare.");
+      return;
     }
-    if (hardFilters.minSqm > 0 || hardFilters.maxSqm > 0) {
-      return {
-        message: "Niciun anunț nu se încadrează în intervalul de suprafață cerut.",
-        actionLabel: "Elimină filtrul de suprafață",
-        onRelax: () => setHardFilters((f) => ({ ...f, minSqm: 0, maxSqm: 0 })),
-      };
-    }
-    if (hardFilters.propertyTypes.length > 0) {
-      return {
-        message: "Niciun anunț de acest tip în zona selectată.",
-        actionLabel: "Include toate tipurile",
-        onRelax: () => setHardFilters((f) => ({ ...f, propertyTypes: [] })),
-      };
-    }
-    return {
-      message: `Niciun anunț disponibil în cele ${zones.length} cartiere selectate.`,
-      actionLabel: "Include cartiere vecine",
-      onRelax: () => setIncludeProximity(true),
-    };
-  }, [displayList.length, hardFilters, zones.length, searchError]);
+    setZoneError(null);
+
+    const qs = buildQuery({
+      city: toApiCity(selectedCity),
+      wholeCity,
+      zones,
+      nearbyZones: includeProximity ? proximityExtra : [],
+      hardFilters,
+      vibe,
+      templatePhotos: selectedPhotos,
+    });
+    router.push(`/results?${qs}`);
+  }
 
   return (
     <MotionConfig reducedMotion="user">
-    <div className="min-h-screen">
-      <AnimatePresence mode="wait">
-        {stage !== "results" ? (
-          <motion.div
-            key="search"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, y: -12 }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
-          >
-            <Hero />
-            <div className="mx-auto max-w-2xl space-y-4 px-4 pb-24">
-              <div className="relative z-10 -mt-10 sm:-mt-14">
-                <VibePrompt
-                  value={vibe}
-                  onChange={setVibe}
-                  detected={liveVibeFilters}
-                  selectedPhotos={selectedPhotos}
-                  onChangePhotos={setSelectedPhotos}
-                  onSubmit={stage === "idle" ? handleSearch : undefined}
-                />
-              </div>
-
-              <div className="rounded-lg border border-concrete/25 bg-white/40 p-4 sm:p-5">
-                <ZoneSelector
-                  locations={LOCATIONS}
-                  selectedZones={zones}
-                  onChangeZones={(z) => {
-                    setZones(z);
-                    if (z.length > 0) setZoneError(null);
-                  }}
-                  includeProximity={includeProximity}
-                  onChangeIncludeProximity={setIncludeProximity}
-                  proximityCount={proximityExtra.length}
-                />
-                {zoneError && <p className="mt-3 text-sm text-brick">{zoneError}</p>}
-              </div>
-
-              <div className="rounded-lg border border-concrete/25 bg-white/40">
-                <button
-                  type="button"
-                  onClick={() => setFiltersOpen((o) => !o)}
-                  aria-expanded={filtersOpen}
-                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left sm:px-5"
-                >
-                  <span className="flex items-center gap-2 text-sm font-medium text-ink">
-                    <SlidersHorizontal className="h-4 w-4 text-concrete" />
-                    Filtre exacte
-                    <span className="font-mono text-xs font-normal text-concrete">(cameră, preț, suprafață)</span>
-                  </span>
-                  <span className="flex items-center gap-2">
-                    {!filtersOpen &&
-                      hardFilterSummary.map((s) => (
-                        <span key={s} className="hidden font-mono text-xs text-brick sm:inline">
-                          {s}
-                        </span>
-                      ))}
-                    <ChevronDown
-                      className={clsx("h-4 w-4 text-concrete transition-transform", filtersOpen && "rotate-180")}
-                    />
-                  </span>
-                </button>
-                {filtersOpen && (
-                  <div className="border-t border-concrete/20 p-4 pt-3 sm:p-5 sm:pt-3">
-                    <HardFiltersPanel value={hardFilters} onChange={setHardFilters} bare />
-                  </div>
-                )}
-              </div>
-
-              {stage !== "idle" && (
-                <div>
-                  <StatusStepper stage={pipelineStage} />
-                  {pipelineStage !== "reading" && (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      {Array.from({ length: 4 }).map((_, i) => (
-                        <SkeletonCard key={i} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+      <div className="min-h-screen">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.35, ease: "easeOut" }}>
+          <Hero />
+          <div className="mx-auto max-w-2xl space-y-4 px-4 pb-24">
+            <div className="relative z-10 mt-4 rounded-lg border border-brick/20 bg-white p-4 shadow-hover sm:mt-6 sm:p-5">
+              <ZoneSelector
+                locations={LOCATIONS}
+                selectedCity={selectedCity}
+                onChangeCity={(city) => {
+                  setSelectedCity(city);
+                  if (city) setZoneError(null);
+                  if (city !== "București") setIncludeProximity(false);
+                }}
+                selectedZones={zones}
+                onChangeZones={(z) => setZones(z)}
+                includeProximity={includeProximity}
+                onChangeIncludeProximity={setIncludeProximity}
+                proximityCount={proximityExtra.length}
+                proximityAvailable={selectedCity === "București" && !wholeCity}
+              />
+              {zoneError && <p className="mt-3 text-sm text-brick">{zoneError}</p>}
             </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="results"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
-          >
-            <ResultsToolbar
-              onBack={handleBack}
+
+            <VibePrompt
+              value={vibe}
+              onChange={setVibe}
+              detected={liveVibeFilters}
+              selectedPhotos={selectedPhotos}
+              onChangePhotos={setSelectedPhotos}
               hardFilters={hardFilters}
-              zonesCount={zones.length}
-              vibeFilters={vibeFiltersUsed}
-              shownCount={displayList.length}
-              totalCount={results.length + hiddenUrls.size}
-              sort={sort}
-              onSortChange={setSort}
-              relevanceAvailable={vibe.trim().length > 0 || selectedPhotos.length > 0}
+              onChangeHardFilters={handleHardFiltersChange}
+              autoFilledFields={autoFilledFields}
+              hardFilterSummary={hardFilterSummary}
+              onSubmit={handleSearch}
             />
-
-            <div className="mx-auto max-w-6xl space-y-4 px-4 py-5">
-              {searchError && <PartialFailureBanner message={searchError} />}
-              {embedError && !searchError && <PartialFailureBanner message={embedError} />}
-
-              {displayList.length === 0 ? (
-                <EmptyState suggestion={emptySuggestion} />
-              ) : (
-                <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <AnimatePresence initial={false}>
-                    {displayList.map((listing, i) => (
-                      <motion.div
-                        key={listing.url}
-                        layout
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.96 }}
-                        transition={{ duration: 0.3, delay: Math.min(i, 9) * 0.04 }}
-                      >
-                        <ListingCard
-                          listing={listing}
-                          requestedFilters={vibeFiltersUsed}
-                          onHide={handleHide}
-                          onMoreLikeThis={handleMoreLikeThis}
-                        />
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+          </div>
+        </motion.div>
+      </div>
     </MotionConfig>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { Sparkles } from "lucide-react";
 import type { HardFilters, PropertyType, RoomCount } from "@/lib/types";
 import { ToggleChip } from "@/components/ui/Chip";
 import clsx from "clsx";
@@ -7,19 +8,34 @@ import clsx from "clsx";
 const ROOM_OPTIONS: (RoomCount | "Orice")[] = ["Orice", "1", "2", "3", "4", "5+"];
 const PROPERTY_TYPES: PropertyType[] = ["Apartament", "Garsoniera", "Studio", "Casa/Vila"];
 
+function AutoBadge() {
+  return (
+    <span title="Dedus din textul liber" className="inline-flex">
+      <Sparkles className="h-3 w-3 text-brick" strokeWidth={2.25} />
+    </span>
+  );
+}
+
 export function HardFiltersPanel({
   value,
   onChange,
+  autoFilledFields,
   bare = false,
 }: {
   value: HardFilters;
   onChange: (next: HardFilters) => void;
+  autoFilledFields?: Set<string>;
   bare?: boolean;
 }) {
+  const isAuto = (field: string) => autoFilledFields?.has(field) ?? false;
+
   const content = (
       <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-concrete">Camere</label>
+          <label className="mb-1.5 flex items-center gap-1 text-xs font-medium text-concrete">
+            Camere
+            {isAuto("rooms") && <AutoBadge />}
+          </label>
           <div className="inline-flex overflow-hidden rounded-sm border border-concrete/40">
             {ROOM_OPTIONS.map((r) => (
               <button
@@ -42,8 +58,9 @@ export function HardFiltersPanel({
         </div>
 
         <div>
-          <label htmlFor="max-price" className="mb-1.5 block text-xs font-medium text-concrete">
+          <label htmlFor="max-price" className="mb-1.5 flex items-center gap-1 text-xs font-medium text-concrete">
             Preț maxim (€/lună)
+            {isAuto("maxPrice") && <AutoBadge />}
           </label>
           <input
             id="max-price"
@@ -59,8 +76,9 @@ export function HardFiltersPanel({
 
         <div className="flex items-end gap-2">
           <div>
-            <label htmlFor="min-sqm" className="mb-1.5 block text-xs font-medium text-concrete">
+            <label htmlFor="min-sqm" className="mb-1.5 flex items-center gap-1 text-xs font-medium text-concrete">
               m² min
+              {isAuto("minSqm") && <AutoBadge />}
             </label>
             <input
               id="min-sqm"
@@ -74,8 +92,9 @@ export function HardFiltersPanel({
             />
           </div>
           <div>
-            <label htmlFor="max-sqm" className="mb-1.5 block text-xs font-medium text-concrete">
+            <label htmlFor="max-sqm" className="mb-1.5 flex items-center gap-1 text-xs font-medium text-concrete">
               m² max
+              {isAuto("maxSqm") && <AutoBadge />}
             </label>
             <input
               id="max-sqm"
@@ -91,7 +110,10 @@ export function HardFiltersPanel({
         </div>
 
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-concrete">Tip proprietate</label>
+          <label className="mb-1.5 flex items-center gap-1 text-xs font-medium text-concrete">
+            Tip proprietate
+            {isAuto("propertyTypes") && <AutoBadge />}
+          </label>
           <div className="flex flex-wrap gap-1.5">
             {PROPERTY_TYPES.map((t) => (
               <ToggleChip

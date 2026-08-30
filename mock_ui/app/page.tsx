@@ -1,5 +1,5 @@
-import { SearchExperience } from "@/components/search/SearchExperience";
+import { redirect } from "next/navigation";
 
-export default function HomePage() {
-  return <SearchExperience />;
+export default function RootPage() {
+  redirect("/home");
 }

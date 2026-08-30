@@ -495,10 +495,23 @@ def query_listings_by_district(
     district_names: list,
     table: str = "listings",
     max_price_eur: float | None = None,
+    city: str | None = None,
 ) -> list:
     """
     Fetch available listings whose district matches any of the given names.
     Drop-in replacement for the Firestore version — returns list of dicts.
+
+    city, if given, scopes the query with .eq("city", city) alongside the
+    district .in_(). GEO_EXPANSION_PLAN.md Phase 0: neighbourhood names are
+    NOT globally unique once more than one city's rows exist — confirmed
+    live 2026-08-30 that "Dacia"/"Aviatiei"/"Cantemir"/"Tudor Vladimirescu"
+    exist in both București and Iași, and "Centru" exists in both
+    Cluj-Napoca and Iași. Without city scoping, selecting e.g. Cluj-Napoca's
+    "Centru" silently also returns Iași's "Centru" listings. Optional (not
+    required) only because streamlit_interface/components/home.py's own
+    zone picker predates multi-city district data and always passes
+    București-only district names — new callers (api/main.py) always pass
+    it.
 
     max_price_eur, if given, filters server-side across both currencies:
     EUR listings compared directly, RON listings compared against
@@ -540,6 +553,8 @@ def query_listings_by_district(
                 .in_("district", chunk)
                 .eq("is_available", 1)
             )
+            if city:
+                query = query.eq("city", city)
             if price_or_filter:
                 query = query.or_(price_or_filter)
             resp = query.execute()
@@ -548,6 +563,181 @@ def query_listings_by_district(
             print(f"  [supabase] query_listings_by_district failed (chunk {i}): {e}")
 
     return results
+
+
+def query_listings_by_city(
+    city: str,
+    table: str = "listings",
+    max_price_eur: float | None = None,
+) -> list:
+    """
+    Fetch every available listing in a city, with no district filter at all
+    — the "whole city" search mode (api/main.py's `all_districts=true`).
+
+    Unlike query_listings_by_district, which chunks by district-name list
+    but never paginates row-wise (an accepted limitation for a single
+    district's row count), an unscoped city query can trivially exceed
+    PostgREST's default page size — so this paginates via .range(), the
+    same pattern get_price_stats/get_all_db_urls already use for
+    full-table scans.
+
+    A city can hold thousands of rows (confirmed live 2026-08-31: 8000 for
+    București), which makes this sequential loop genuinely slow (~34s
+    end-to-end measured against the real project). A concurrent-fan-out
+    version was tried and reverted: firing even 3 simultaneous page
+    requests reliably hit "canceling statement due to statement timeout"
+    on most of them (confirmed live against this project) — this Supabase
+    instance's connection/statement budget can't absorb it, and the
+    concurrent version was silently returning a fraction of the city's
+    listings. Slow-but-correct beats fast-but-wrong here; a real fix needs
+    pushing pagination + hard filters into the SQL query itself (so a
+    plain no-ranking whole-city browse only ever fetches `page_size` rows
+    from the DB, never the whole city) rather than parallelizing the
+    current fetch-everything-then-filter-in-Python approach.
+    """
+    client = get_anon_client()
+    results: list[dict] = []
+
+    price_or_filter = None
+    if max_price_eur is not None and max_price_eur > 0:
+        rate = get_ron_to_eur_rate()
+        max_price_ron = max_price_eur * rate
+        price_or_filter = (
+            "price_numeric.is.null,"
+            f"and(price_currency.eq.EUR,price_numeric.lte.{max_price_eur}),"
+            f"and(price_currency.eq.RON,price_numeric.lte.{max_price_ron})"
+        )
+
+    offset, page_size = 0, 1000
+    while True:
+        try:
+            query = (
+                client.table(table)
+                .select(_DISTRICT_QUERY_COLUMNS)
+                .eq("city", city)
+                .eq("is_available", 1)
+            )
+            if price_or_filter:
+                query = query.or_(price_or_filter)
+            resp = query.range(offset, offset + page_size - 1).execute()
+            chunk = resp.data or []
+            results.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            offset += page_size
+        except Exception as e:
+            print(f"  [supabase] query_listings_by_city failed: {e}")
+            break
+
+    return results
+
+
+def _hard_filter_or_clauses(
+    max_price_eur: float | None,
+    rooms: str | None,
+    min_sqm: float | None,
+    max_sqm: float | None,
+    property_types: list[str] | None,
+) -> list[str]:
+    """Build the same "keep it if the value's missing/unparseable, apply
+    the cutoff otherwise" OR-clauses pipeline_core.apply_filters applies
+    in Python, as PostgREST filter strings — so query_listings_by_city_paginated
+    can push every hard filter into the SQL query instead of fetching
+    everything and filtering in a DataFrame.
+
+    This is only safe because listings.rooms/property_type already hold
+    canonical values in practice (confirmed live 2026-08-31: rooms is one
+    of "1".."4","5+"/null, property_type one of "Apartament"/"Garsoniera"/
+    "Studio"/"Casa/Vila"/null) — apply_filters additionally handles messy
+    values via pipeline_core.parse_rooms's regex extraction, which a plain
+    .eq()/.in_() can't replicate; if a differently-shaped value ever shows
+    up in one of these columns, it would fail every clause here and get
+    excluded (rather than kept, like a genuinely missing value is) instead
+    of being coerced the way parse_rooms would. Rooms canonicalisation
+    happens at scrape time, not in this filter, so that risk is accepted
+    rather than solved here.
+    """
+    clauses = []
+    if max_price_eur is not None and max_price_eur > 0:
+        rate = get_ron_to_eur_rate()
+        max_price_ron = max_price_eur * rate
+        clauses.append(
+            "price_numeric.is.null,"
+            f"and(price_currency.eq.EUR,price_numeric.lte.{max_price_eur}),"
+            f"and(price_currency.eq.RON,price_numeric.lte.{max_price_ron})"
+        )
+    if rooms:
+        clauses.append(f"rooms.is.null,rooms.eq.{rooms}")
+    if min_sqm is not None and min_sqm > 0:
+        clauses.append(f"area_sqm.is.null,area_sqm.gte.{min_sqm}")
+    if max_sqm is not None and max_sqm > 0:
+        clauses.append(f"area_sqm.is.null,area_sqm.lte.{max_sqm}")
+    if property_types:
+        clauses.append(f"property_type.is.null,property_type.in.({','.join(property_types)})")
+    return clauses
+
+
+def query_listings_by_city_paginated(
+    city: str,
+    table: str = "listings",
+    max_price_eur: float | None = None,
+    rooms: str | None = None,
+    min_sqm: float | None = None,
+    max_sqm: float | None = None,
+    property_types: list[str] | None = None,
+    offset: int = 0,
+    limit: int = 60,
+) -> tuple[list[dict], int]:
+    """
+    Fast path for a whole-city browse with no ranking requested
+    (api/main.py only calls this when there's no vibe/image query — a
+    ranked search still needs the full matching set in memory to sort
+    over, so it stays on query_listings_by_city).
+
+    Unlike query_listings_by_city, which fetches every row in the city
+    before pipeline_core.apply_filters narrows it down in a DataFrame,
+    this pushes every hard filter into the SQL query (_hard_filter_or_clauses)
+    and paginates with .range() + count="exact" — exactly one request,
+    fetching at most `limit` rows, regardless of how big the city is.
+    query_listings_by_city measured ~34s fetching all of București's
+    ~9000 rows just to hand back one 60-row page; this measures in
+    single-digit seconds since the DB never returns more than the page
+    actually asked for.
+
+    A concurrent multi-page fetch was tried earlier for the "fetch
+    everything faster" version of this problem and reverted — this
+    Supabase project's connection/statement budget can't absorb more than
+    ~2 simultaneous heavy queries before throwing statement timeouts. This
+    function sidesteps that entirely by never needing more than one page.
+
+    That said, this project throws a lone "canceling statement due to
+    statement timeout" occasionally even with zero concurrent load
+    (confirmed live 2026-08-31) — the same cold-query-plan latency spike
+    _rpc_with_retry already retries once for elsewhere in this file. Since
+    this is now the *only* request the whole-city fast path makes, letting
+    that hit fail outright turns a transient hiccup into a search that
+    silently comes back with zero results instead of erroring or retrying
+    — indistinguishable, from the results page, from "nothing matches your
+    filters". One blind retry (same shape as _rpc_with_retry) costs
+    nothing extra on the (usual) success path and fixes that.
+    """
+    client = get_anon_client()
+    query = client.table(table).select(_DISTRICT_QUERY_COLUMNS, count="exact")
+    query = query.eq("city", city).eq("is_available", 1)
+    for clause in _hard_filter_or_clauses(max_price_eur, rooms, min_sqm, max_sqm, property_types):
+        query = query.or_(clause)
+
+    try:
+        resp = query.range(offset, offset + limit - 1).execute()
+    except Exception as e:
+        print(f"  [supabase] query_listings_by_city_paginated failed, retrying once: {e}")
+        try:
+            resp = query.range(offset, offset + limit - 1).execute()
+        except Exception as e2:
+            print(f"  [supabase] query_listings_by_city_paginated failed on retry: {e2}")
+            return [], 0
+
+    return resp.data or [], resp.count or 0
 
 
 def get_all_db_urls(table: str = "listings") -> set[str]:
@@ -755,11 +945,19 @@ def search_by_text_vibe(
         return {}
 
 
-def get_price_stats(table: str = "listings") -> dict:
+def get_price_stats(table: str = "listings", city: str | None = None) -> dict:
     """
     Return average EUR price per (district, rooms) bucket for available listings.
     Buckets with fewer than 5 comparables are suppressed.
     Result: {("Floreasca", "2"): {"avg": 850.0, "count": 23}, ...}
+
+    city, if given, scopes the bucket population to that city before
+    bucketing by (district, rooms) — required now that neighbourhood names
+    collide across cities (GEO_EXPANSION_PLAN.md Phase 0, same finding as
+    query_listings_by_district): without it, a Cluj-Napoca "Centru" studio
+    would get bucketed together with Iași's "Centru" studios into one
+    blended, meaningless average. Optional only for the same
+    Streamlit-caller-predates-multi-city reason as query_listings_by_district.
     """
     MIN_COMPARABLES = 5
     client = get_anon_client()
@@ -768,14 +966,15 @@ def get_price_stats(table: str = "listings") -> dict:
 
     while True:
         try:
-            resp = (
+            query = (
                 client.table(table)
                 .select("district, rooms, price_numeric")
                 .eq("is_available", 1)
                 .eq("price_currency", "EUR")
-                .range(offset, offset + page_size - 1)
-                .execute()
             )
+            if city:
+                query = query.eq("city", city)
+            resp = query.range(offset, offset + page_size - 1).execute()
             chunk = resp.data or []
             rows.extend(chunk)
             if len(chunk) < page_size:

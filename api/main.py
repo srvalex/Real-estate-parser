@@ -37,8 +37,19 @@ from embedding import embed_query
 app = FastAPI(title="Real Estate Search API")
 
 _allowed_origins = [
-    o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()
+    o.strip()
+    for o in os.environ.get(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:3001,http://localhost:3002"
+    ).split(",")
+    if o.strip()
 ]
+# `next dev` bumps to the next free port (3001, 3002, ...) whenever 3000 is
+# already taken — e.g. this API's own dev server left running from an
+# earlier session alongside a separately-started one. Covering a few
+# adjacent ports here means CORS doesn't silently break search just because
+# two frontend instances happened to be up at once; a fetch blocked by CORS
+# surfaces in the browser as a bare "Failed to fetch" with nothing else
+# logged, which is easy to mistake for the API being down entirely.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
@@ -91,7 +102,13 @@ def _parse_list_field(value) -> list:
 
 @app.get("/listings/search", response_model=SearchResponse)
 def search_listings(
-    districts: str = Query(..., description="Comma-separated neighbourhood names (required, non-empty)"),
+    city: str = Query(..., description="e.g. Bucuresti, Cluj-Napoca, Iasi — see api/data/cities.json"),
+    districts: Optional[str] = Query(
+        None, description="Comma-separated neighbourhood names (required unless all_districts=true)"
+    ),
+    all_districts: bool = Query(
+        False, description="Search every listing in `city`, ignoring `districts`/`nearby_districts`"
+    ),
     nearby_districts: Optional[str] = Query(None, description="Comma-separated proximity-expanded extra zones"),
     max_price: Optional[float] = Query(None, ge=0),
     rooms: Optional[str] = Query(None),
@@ -107,8 +124,10 @@ def search_listings(
 ):
     core_zones = _split_csv(districts)
     nearby_zones = _split_csv(nearby_districts)
-    if not core_zones:
-        raise HTTPException(status_code=422, detail="districts must be a non-empty comma-separated list")
+    if not all_districts and not core_zones:
+        raise HTTPException(
+            status_code=422, detail="districts must be a non-empty comma-separated list, or all_districts=true"
+        )
 
     property_type_list = _split_csv(property_types)
     template_photo_ids = _split_csv(template_photos)
@@ -118,10 +137,11 @@ def search_listings(
     # never narrow the core selection
     all_zones = list(dict.fromkeys(core_zones + nearby_zones))
 
-    rows = db_utils.query_listings_by_district(all_zones, max_price_eur=max_price)
-    df = pd.DataFrame(rows)
-
-    applied_filters: dict[str, dict] = {"districts": {"value": core_zones, "source": "user"}}
+    applied_filters: dict[str, dict] = {"city": {"value": city, "source": "user"}}
+    if all_districts:
+        applied_filters["all_districts"] = {"value": True, "source": "user"}
+    else:
+        applied_filters["districts"] = {"value": core_zones, "source": "user"}
     if nearby_zones:
         applied_filters["nearby_districts"] = {"value": nearby_zones, "source": "user"}
     if max_price:
@@ -141,28 +161,58 @@ def search_listings(
 
     embedding_sorted = False
     embed_error = None
+    needs_ranking = bool((vibe and vibe.strip()) or image_embedding)
 
-    if not df.empty:
-        df = pipeline_core.prepare_dataframe(df)
-        df = pipeline_core.apply_filters(
-            df,
-            max_price=max_price or 0,
-            sel_rooms=rooms or "Orice",
-            min_sqm=min_sqm or 0,
-            max_sqm=max_sqm or 0,
+    if all_districts and not needs_ranking:
+        # No ranking requested, so there's no need to pull the whole city
+        # into memory just to hand back one page of it — every hard
+        # filter is pushed into the SQL query itself and the DB paginates
+        # directly (query_listings_by_city_paginated), instead of the
+        # fetch-everything-then-filter-in-Python approach below, which
+        # measured ~34s end-to-end for a ~9000-row city.
+        rows, total_count = db_utils.query_listings_by_city_paginated(
+            city,
+            max_price_eur=max_price,
+            rooms=rooms if rooms and rooms != "Orice" else None,
+            min_sqm=min_sqm,
+            max_sqm=max_sqm,
             property_types=property_type_list or None,
+            offset=(page - 1) * page_size,
+            limit=page_size,
         )
-        price_stats = db_utils.get_price_stats()  # not cached at this layer, see MIGRATION_PLAN.md Phase 1
-        df = pipeline_core.apply_price_fairness(df, price_stats=price_stats)
+        page_df = pd.DataFrame(rows)
+        if not page_df.empty:
+            page_df = pipeline_core.prepare_dataframe(page_df)
+            price_stats = db_utils.get_price_stats(city=city)
+            page_df = pipeline_core.apply_price_fairness(page_df, price_stats=price_stats)
+    else:
+        if all_districts:
+            rows = db_utils.query_listings_by_city(city, max_price_eur=max_price)
+        else:
+            rows = db_utils.query_listings_by_district(all_zones, max_price_eur=max_price, city=city)
+        df = pd.DataFrame(rows)
 
-        if (vibe and vibe.strip()) or image_embedding:
-            df, embedding_sorted, embed_error = pipeline_core.apply_ai_scores(
-                df, vibe or "", url_col="url", embed_query=embed_query, image_embedding=image_embedding,
+        if not df.empty:
+            df = pipeline_core.prepare_dataframe(df)
+            df = pipeline_core.apply_filters(
+                df,
+                max_price=max_price or 0,
+                sel_rooms=rooms or "Orice",
+                min_sqm=min_sqm or 0,
+                max_sqm=max_sqm or 0,
+                property_types=property_type_list or None,
             )
+            price_stats = db_utils.get_price_stats(city=city)  # not cached at this layer, see MIGRATION_PLAN.md Phase 1
+            df = pipeline_core.apply_price_fairness(df, price_stats=price_stats)
 
-    total_count = len(df)
-    start = (page - 1) * page_size
-    page_df = df.iloc[start : start + page_size] if not df.empty else df
+            if needs_ranking:
+                df, embedding_sorted, embed_error = pipeline_core.apply_ai_scores(
+                    df, vibe or "", url_col="url", embed_query=embed_query, image_embedding=image_embedding,
+                )
+
+        total_count = len(df)
+        start = (page - 1) * page_size
+        page_df = df.iloc[start : start + page_size] if not df.empty else df
 
     has_score_col = "_similarity_score" in page_df.columns
     has_text_score_col = "_text_similarity" in page_df.columns
@@ -179,7 +229,7 @@ def search_listings(
             "price_numeric": _clean(row.get("price_numeric")) or 0,
             "price_currency": _clean(row.get("price_currency")) or "EUR",
             "district": district,
-            "sector": sector_for(district),
+            "sector": sector_for(city, district),
             "location_full": _clean(row.get("location_full")) or "",
             "rooms": str(_clean(row.get("rooms")) or ""),
             "area_sqm": _clean(row.get("area_sqm")),

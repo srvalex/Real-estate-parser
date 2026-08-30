@@ -57,7 +57,7 @@ export function AnalyticsDashboard() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
-        <Link href="/" className="inline-flex items-center gap-1.5 text-sm font-medium text-ink hover:text-brick">
+        <Link href="/home" className="inline-flex items-center gap-1.5 text-sm font-medium text-ink hover:text-brick">
           <ArrowLeft className="h-4 w-4" /> Căutare
         </Link>
         <h1 className="font-display text-xl italic text-ink">Piața chiriilor din București</h1>

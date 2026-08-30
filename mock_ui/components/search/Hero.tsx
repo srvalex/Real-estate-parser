@@ -8,7 +8,7 @@ const HERO_IMAGE_URL =
 
 export function Hero() {
   return (
-    <div className="relative h-[360px] w-full overflow-hidden sm:h-[440px]">
+    <div className="relative h-[300px] w-full overflow-hidden sm:h-[360px]">
       <img
         src={HERO_IMAGE_URL}
         alt="Fațadă de bloc în lumina serii"
@@ -16,18 +16,18 @@ export function Hero() {
       />
 
       <Link
-        href="/analytics"
+        href="/market-analytics"
         className="absolute right-4 top-4 inline-flex items-center gap-1.5 bg-ink/70 px-2.5 py-1.5 text-xs font-medium text-paper hover:bg-ink/85 sm:right-6 sm:top-6"
       >
         <BarChart3 className="h-3.5 w-3.5" /> Analiză de piață
       </Link>
 
-      <div className="absolute inset-x-0 bottom-0 px-4 pb-14 sm:pb-16">
-        <div className="mx-auto max-w-xl bg-ink/75 px-5 py-5 text-center sm:px-8 sm:py-6">
-          <h1 className="font-display text-3xl italic leading-tight text-paper sm:text-5xl">
+      <div className="absolute inset-x-0 bottom-0 px-4 pb-24 sm:pb-28">
+        <div className="mx-auto max-w-xl bg-ink/75 px-5 py-4 text-center sm:px-8 sm:py-5">
+          <h1 className="font-display text-2xl italic leading-tight text-paper sm:text-4xl">
             Spune-i ce cauți la o locuință.
           </h1>
-          <p className="mt-3 text-sm text-paper/80 sm:text-base">
+          <p className="mt-2 text-sm text-paper/80 sm:text-base">
             Descrie apartamentul cu cuvintele tale. Restul e treaba noastră.
           </p>
         </div>

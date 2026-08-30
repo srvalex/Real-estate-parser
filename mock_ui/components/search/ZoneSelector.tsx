@@ -22,32 +22,76 @@ type Scope =
   | { level: "city"; city: LocationCity }
   | { level: "district"; city: LocationCity; district: LocationDistrict };
 
-function resolveScope(confirmedSegments: string[], locations: LocationCity[]): Scope {
+// Walks the comma-separated segments the user has typed, descending one
+// level per segment. A segment before the last one keeps the old lenient
+// exact-or-substring match (so an abbreviated "Buc, Sect 2, Stefan" still
+// resolves once the user has moved on from it). The *last* segment only
+// auto-descends on an EXACT (diacritic/case-insensitive) match — an exact
+// match unambiguously means "fully specified", so it's safe to commit to
+// it without waiting for a trailing comma the user never has to type. A
+// non-exact last segment is returned as `live`, the fuzzy filter text for
+// whatever the caller renders at the current scope — this is also what
+// preserves the "skip-district" search (e.g. "București, Ștefan cel
+// Mare"), since a district name never exactly matches a zone name.
+function resolveScope(rawSegments: string[], locations: LocationCity[]): { scope: Scope; live: string } {
   let scope: Scope = { level: "root" };
 
-  for (const raw of confirmedSegments) {
+  for (let i = 0; i < rawSegments.length; i++) {
+    const raw = rawSegments[i];
     const norm = normalize(raw);
-    if (!norm) continue;
+    const isLast = i === rawSegments.length - 1;
+
+    if (!norm) {
+      if (isLast) return { scope, live: "" };
+      continue;
+    }
 
     if (scope.level === "root") {
-      const city =
-        locations.find((l) => normalize(l.city) === norm) ??
-        locations.find((l) => normalize(l.city).includes(norm));
-      if (!city) return scope;
-      scope = { level: "city", city };
-    } else if (scope.level === "city") {
-      const districts = scope.city.districts;
-      const district = districts
-        ? districts.find((d) => normalize(d.name) === norm) ?? districts.find((d) => normalize(d.name).includes(norm))
-        : undefined;
-      if (!district) return scope;
-      scope = { level: "district", city: scope.city, district };
-    } else {
-      return scope;
+      const exact = locations.find((l) => normalize(l.city) === norm);
+      if (exact) {
+        scope = { level: "city", city: exact };
+        continue;
+      }
+      if (isLast) return { scope, live: raw };
+      const fuzzy = locations.find((l) => normalize(l.city).includes(norm));
+      if (!fuzzy) return { scope, live: raw };
+      scope = { level: "city", city: fuzzy };
+      continue;
     }
+
+    if (scope.level === "city") {
+      const cityAtScope = scope.city;
+      if (!cityAtScope.districts) {
+        // Flat city: no deeper scope, but an exact zone match is still a
+        // complete, unambiguous pick — clear `live` so the dropdown falls
+        // back to showing every zone again instead of re-filtering by name.
+        const zoneMatch = cityAtScope.zones.find((z) => normalize(z) === norm);
+        if (zoneMatch && isLast) return { scope, live: "" };
+        return { scope, live: raw };
+      }
+      const districts: LocationDistrict[] = cityAtScope.districts;
+      const exact: LocationDistrict | undefined = districts.find((d: LocationDistrict) => normalize(d.name) === norm);
+      if (exact) {
+        scope = { level: "district", city: scope.city, district: exact };
+        continue;
+      }
+      if (isLast) return { scope, live: raw };
+      const fuzzy: LocationDistrict | undefined = districts.find((d: LocationDistrict) =>
+        normalize(d.name).includes(norm)
+      );
+      if (!fuzzy) return { scope, live: raw };
+      scope = { level: "district", city: scope.city, district: fuzzy };
+      continue;
+    }
+
+    // scope.level === "district": leaf level, nothing further to descend
+    // into — same exact-zone-match courtesy as the flat-city case above.
+    const zoneMatch = scope.district.zones.find((z) => normalize(z) === norm);
+    if (zoneMatch && isLast) return { scope, live: "" };
+    return { scope, live: raw };
   }
 
-  return scope;
+  return { scope, live: "" };
 }
 
 type Row =
@@ -57,51 +101,75 @@ type Row =
 
 export function ZoneSelector({
   locations,
+  selectedCity,
+  onChangeCity,
   selectedZones,
   onChangeZones,
   includeProximity,
   onChangeIncludeProximity,
   proximityCount,
+  proximityAvailable = true,
 }: {
   locations: LocationCity[];
+  selectedCity: string | null;
+  onChangeCity: (city: string | null) => void;
   selectedZones: string[];
   onChangeZones: (zones: string[]) => void;
   includeProximity: boolean;
   onChangeIncludeProximity: (v: boolean) => void;
   proximityCount: number;
+  proximityAvailable?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedSet = new Set(selectedZones);
 
-  function toggleZone(name: string) {
-    onChangeZones(selectedSet.has(name) ? selectedZones.filter((z) => z !== name) : [...selectedZones, name]);
+  // A search can only span one city at a time — neighbourhood names collide
+  // across cities (e.g. "Centru" in both Cluj-Napoca and Iași), so a bare
+  // zone-name array is meaningless without knowing which city it belongs to.
+  // Picking a zone in a different city than the one already active replaces
+  // the whole selection instead of merging into it.
+  function commitZones(city: string, zones: string[]) {
+    onChangeZones(zones);
+    onChangeCity(zones.length > 0 ? city : null);
   }
 
-  function toggleDistrictZones(zones: string[]) {
+  function toggleZone(city: string, name: string) {
+    if (city !== selectedCity) {
+      commitZones(city, [name]);
+      return;
+    }
+    commitZones(city, selectedSet.has(name) ? selectedZones.filter((z) => z !== name) : [...selectedZones, name]);
+  }
+
+  function toggleDistrictZones(city: string, zones: string[]) {
+    if (city !== selectedCity) {
+      commitZones(city, [...zones]);
+      return;
+    }
     const allSelected = zones.every((n) => selectedSet.has(n));
-    onChangeZones(
+    commitZones(
+      city,
       allSelected ? selectedZones.filter((z) => !zones.includes(z)) : [...new Set([...selectedZones, ...zones])]
     );
   }
 
-  const { scope, rows } = useMemo(() => {
+  const { scope, rows, live } = useMemo(() => {
     const rawSegments = query.split(",").map((s) => s.trim());
-    const liveRaw = rawSegments[rawSegments.length - 1];
+    const { scope: currentScope, live: liveRaw } = resolveScope(rawSegments, locations);
     const live = normalize(liveRaw);
-    const confirmed = rawSegments.slice(0, -1).filter(Boolean);
-    const currentScope = resolveScope(confirmed, locations);
 
     function districtRow(city: LocationCity, d: LocationDistrict): Row {
-      const allSelected = d.zones.length > 0 && d.zones.every((n) => selectedSet.has(n));
+      const allSelected =
+        city.city === selectedCity && d.zones.length > 0 && d.zones.every((n) => selectedSet.has(n));
       return {
         kind: "district",
         key: `district:${city.city}:${d.name}`,
         label: d.name,
         allSelected,
-        onDrill: () => setQuery(`${city.city}, ${d.name}, `),
-        onToggleAll: () => toggleDistrictZones(d.zones),
+        onDrill: () => setQuery(`${city.city}, ${d.name}`),
+        onToggleAll: () => toggleDistrictZones(city.city, d.zones),
       };
     }
 
@@ -111,10 +179,10 @@ export function ZoneSelector({
         key: `zone:${city.city}:${d?.name ?? ""}:${z}`,
         label: z,
         sublabel: d ? `${d.name}, ${city.city}` : city.city,
-        selected: selectedSet.has(z),
+        selected: city.city === selectedCity && selectedSet.has(z),
         onSelect: () => {
-          toggleZone(z);
-          setQuery(d ? `${city.city}, ${d.name}, ` : `${city.city}, `);
+          toggleZone(city.city, z);
+          setQuery(d ? `${city.city}, ${d.name}` : city.city);
         },
       };
     }
@@ -122,17 +190,22 @@ export function ZoneSelector({
     const out: Row[] = [];
 
     if (currentScope.level === "root") {
-      if (!live) return { scope: currentScope, rows: out };
+      if (!live) return { scope: currentScope, rows: out, live };
+
+      // Cities are the primary action at this level, so they're always
+      // their own group at the top — a city name matching never also
+      // dumps every one of its districts into the list below it (that
+      // only happens once the user actually drills into that city).
       for (const loc of locations) {
-        const cityMatches = normalize(loc.city).includes(live);
+        if (normalize(loc.city).includes(live)) {
+          out.push({ kind: "city", key: `city:${loc.city}`, label: loc.city, onDrill: () => setQuery(loc.city) });
+        }
+      }
+
+      for (const loc of locations) {
         if (loc.districts) {
-          if (cityMatches) {
-            out.push({ kind: "city", key: `city:${loc.city}`, label: loc.city, onDrill: () => setQuery(`${loc.city}, `) });
-            for (const d of loc.districts) out.push(districtRow(loc, d));
-          } else {
-            for (const d of loc.districts) {
-              if (normalize(d.name).includes(live)) out.push(districtRow(loc, d));
-            }
+          for (const d of loc.districts) {
+            if (normalize(d.name).includes(live)) out.push(districtRow(loc, d));
           }
           for (const d of loc.districts) {
             for (const z of d.zones) {
@@ -140,7 +213,6 @@ export function ZoneSelector({
             }
           }
         } else {
-          if (cityMatches) out.push({ kind: "city", key: `city:${loc.city}`, label: loc.city, onDrill: () => setQuery(`${loc.city}, `) });
           for (const z of loc.zones) {
             if (normalize(z).includes(live)) out.push(zoneRow(loc, null, z));
           }
@@ -171,35 +243,43 @@ export function ZoneSelector({
       }
     }
 
-    return { scope: currentScope, rows: out.slice(0, 30) };
+    return { scope: currentScope, rows: out.slice(0, 30), live };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, locations, selectedZones]);
+  }, [query, locations, selectedZones, selectedCity]);
 
   const chips = useMemo(() => {
     const items: { key: string; label: string; remove: () => void }[] = [];
     const consumed = new Set<string>();
+    // Chips are always read against the single active city — with
+    // colliding neighbourhood names across cities, matching selectedZones
+    // against every city's districts (rather than just selectedCity's)
+    // could label a chip with the wrong city's district name.
+    const activeCity = selectedCity ? locations.find((l) => l.city === selectedCity) : undefined;
 
-    for (const loc of locations) {
-      if (!loc.districts) continue;
-      for (const d of loc.districts) {
+    if (activeCity?.districts) {
+      for (const d of activeCity.districts) {
         const allSelected = d.zones.length > 0 && d.zones.every((n) => selectedSet.has(n));
         if (allSelected) {
           d.zones.forEach((n) => consumed.add(n));
           items.push({
-            key: `${loc.city}:${d.name}`,
+            key: `${activeCity.city}:${d.name}`,
             label: d.name,
-            remove: () => onChangeZones(selectedZones.filter((z) => !d.zones.includes(z))),
+            remove: () => commitZones(activeCity.city, selectedZones.filter((z) => !d.zones.includes(z))),
           });
         }
       }
     }
     for (const z of selectedZones) {
       if (consumed.has(z)) continue;
-      items.push({ key: z, label: z, remove: () => onChangeZones(selectedZones.filter((x) => x !== z)) });
+      items.push({
+        key: z,
+        label: z,
+        remove: () => commitZones(selectedCity ?? "", selectedZones.filter((x) => x !== z)),
+      });
     }
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locations, selectedZones]);
+  }, [locations, selectedZones, selectedCity]);
 
   const breadcrumb =
     scope.level === "city" ? scope.city.city : scope.level === "district" ? `${scope.city.city} › ${scope.district.name}` : null;
@@ -217,7 +297,16 @@ export function ZoneSelector({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => setOpen(true)}
-            onBlur={() => setOpen(false)}
+            onBlur={() => {
+              setOpen(false);
+              // Leaving the box with a fully-typed city and no
+              // neighbourhood picked implies "search the whole city" —
+              // there's no separate "Tot orașul" option to click.
+              if (scope.level === "city" && !live && scope.city.city !== selectedCity) {
+                onChangeCity(scope.city.city);
+                onChangeZones([]);
+              }
+            }}
             placeholder="Oraș, sector sau cartier (ex. București, Sector 2, Ștefan cel Mare)"
             className="w-full bg-transparent text-sm text-ink placeholder:text-concrete/60 focus:outline-none"
           />
@@ -332,19 +421,21 @@ export function ZoneSelector({
         )}
       </div>
 
-      <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-ink">
-        <input
-          type="checkbox"
-          checked={includeProximity}
-          onChange={(e) => onChangeIncludeProximity(e.target.checked)}
-          className="h-4 w-4 accent-brick"
-        />
-        <MapPin className="h-4 w-4 text-concrete" />
-        Include cartiere vecine
-        {includeProximity && proximityCount > 0 && (
-          <span className="font-mono text-xs text-concrete">(+{proximityCount})</span>
-        )}
-      </label>
+      {proximityAvailable && (
+        <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            checked={includeProximity}
+            onChange={(e) => onChangeIncludeProximity(e.target.checked)}
+            className="h-4 w-4 accent-brick"
+          />
+          <MapPin className="h-4 w-4 text-concrete" />
+          Include cartiere vecine
+          {includeProximity && proximityCount > 0 && (
+            <span className="font-mono text-xs text-concrete">(+{proximityCount})</span>
+          )}
+        </label>
+      )}
     </div>
   );
 }
