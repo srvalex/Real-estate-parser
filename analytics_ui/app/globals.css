@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-concrete/20;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: theme("colors.brick");
+    color: theme("colors.paper");
+  }
+
+  :focus-visible {
+    outline: 2px solid theme("colors.brick");
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Numerals render tabular by default wherever the mono/data face is used */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Thin, quiet scrollbars for horizontal image strips / breadcrumbs */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: theme("colors.concrete") transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: theme("colors.concrete");
+  border-radius: 999px;
+}

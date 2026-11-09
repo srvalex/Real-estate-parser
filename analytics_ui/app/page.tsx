@@ -1,4 +1,4 @@
-import { AnalyticsDashboard } from "@/components/analytics/AnalyticsDashboard";
+import { AnalyticsDashboard } from "@/components/AnalyticsDashboard";
 
 export default function MarketAnalyticsPage() {
   return <AnalyticsDashboard />;
