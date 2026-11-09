@@ -1,0 +1,289 @@
+==============================================================================
+DESCRIPTION CLUSTERS — rental listings, first_seen_at >= 2026-08-01
+==============================================================================
+
+rows            : 7,950  (of 19,371 in the listings cache — see provenance)
+embedding       : paraphrase-multilingual-MiniLM-L12-v2, 384-d, L2-normalised
+reduction       : PCA 100 components (91.3% of variance)
+clustering      : KMeans k=6, n_init=10, random_state=0
+cities          : {'Bucuresti': 5718, 'Cluj-Napoca': 1320, 'Iasi': 912}
+platforms       : {'storia': 5862, 'olx': 2088}
+
+Cluster numbers are NOT stable across re-runs — they change with the seed, k
+and N_PCS. Labels below were read off the term lists in this run.
+
+------------------------------------------------------------------------------
+CLUSTER 0 — one agency's template (APEX, Bucharest only)
+------------------------------------------------------------------------------
+  listings      : 297  (3.7% of the frame)
+  median rent   : EUR 600/month
+  median area   : 60 m2
+  median EUR/m2 : 10.2
+
+  distinguishing terms (TF-IDF lift vs. the rest of the corpus):
+    imobiliara, bucuresti, apex, apex imobiliare, imobiliara bucuresti, imobiliare romania, agentie imobiliara, romania, contor, romania agentie, proximitatea fata, identitate, agentie, proximitatea
+
+  city    : {'Bucuresti': 1.0, 'Iasi': 0.0}
+  platform: {'storia': 0.97, 'olx': 0.03}
+  rooms   : {'2': 0.66, '3': 0.25, '4': 0.05, '1': 0.04, '?': 0.0}
+  agency  : {True: 0.97, nan: 0.03}
+
+  closest to centroid (most representative ads):
+    - [2r  58m2  EUR850]  cod intern anunt: p298869 pret: 850 | bucuresti informatii si caracteristici: situatie mobilier - complet dormitoare - 1 grupuri sanitare - 1 incalzire - centrala imobil, incalzire pardoseala clima - aer conditionat parcare - 1 utilitati generale - curent electric, apa, canalizare, gaz, catv, telefo…
+
+    - [2r  45m2  EUR520]  cod intern anunt: p299663 pret: 520 | bucuresti informatii si caracteristici: situatie mobilier - complet dormitoare - 1 grupuri sanitare - 1 balcoane - 1 incalzire - centrala proprie, calorifere clima - aer conditionat utilitati generale - curent electric, apa, canalizare, gaz, catv, telefon, acces…
+
+    - [2r  50m2  EUR580]  cod intern anunt: p301865 pret: 580 | bucuresti informatii si caracteristici: situatie mobilier - complet dormitoare - 1 grupuri sanitare - 1 balcoane - 1 incalzire - termoficare, centrala proprie, calorifere clima - aer conditionat parcare - 1 utilitati generale - curent electric, apa, canalizare, …
+
+
+------------------------------------------------------------------------------
+CLUSTER 1 — 2-room agency listing (portal boilerplate)
+------------------------------------------------------------------------------
+  listings      : 2,758  (34.7% of the frame)
+  median rent   : EUR 580/month
+  median area   : 55 m2
+  median EUR/m2 : 10.6
+
+  distinguishing terms (TF-IDF lift vs. the rest of the corpus):
+    ace imobiliare, ace, apartament camere, camere, mobilat utilat, apartament, utilat, luna chirie, inchiriere apartament, apartamentul, camere situat, luna, alte, comisionul
+
+  city    : {'Bucuresti': 0.68, 'Cluj-Napoca': 0.18, 'Iasi': 0.15}
+  platform: {'storia': 0.79, 'olx': 0.21}
+  rooms   : {'2': 0.91, '?': 0.03, '3': 0.03, '1': 0.02, '4': 0.0, '5+': 0.0}
+  agency  : {True: 0.76, nan: 0.21, False: 0.02}
+
+  closest to centroid (most representative ads):
+    - [2r  65m2  EUR550]  local imobiliare ofera spre inchiriere apartament cu 2 camere situat in a. muresanu , zona rezidentiala linistita. apartamentul este semidecomandat, situat la parter si are o suprafata utila de 65 mp. acesta este compartimentat astfel: 1 dormitor, living, bucatarie, 1 baie, debara. confortul termic …
+
+    - [2r  60m2  EUR600]  p298104 ace imobiliare va ofera spre inchiriere un apartament cu 2 camere, situat in zona vitan. locuinta are o suprafata de 60 mp si se afla la etajul 2, intr-un imobil cu regim de inaltime p+4. apartamentul este mobilat si utilat, pregatit pentru noii chiriasi. zona beneficiaza de acces facil la t…
+
+    - [2r  61m2  EUR520]  p293333 ace imobiliare va ofera spre inchiriere un apartament cu 2 camere, situat in zona tei. locuinta are o suprafata de 61 mp si se afla la etajul 1, intr-un imobil cu regim de inaltime p+4. apartamentul este mobilat si utilat, pregatit pentru noii chiriasi. zona beneficiaza de acces facil la tra…
+
+
+------------------------------------------------------------------------------
+CLUSTER 2 — premium-segment vocabulary ('premium', 'lux', 'finisaje')
+------------------------------------------------------------------------------
+  listings      : 1,084  (13.6% of the frame)
+  median rent   : EUR 755/month
+  median area   : 60 m2
+  median EUR/m2 : 12.3
+
+  distinguishing terms (TF-IDF lift vs. the rest of the corpus):
+    bucurestiului, dintre, premium, cluj, cele, nordul, napoca, cluj napoca, dintre cele, una, una dintre, zone, rapid, floreasca
+
+  city    : {'Bucuresti': 0.74, 'Cluj-Napoca': 0.23, 'Iasi': 0.03}
+  platform: {'storia': 0.84, 'olx': 0.16}
+  rooms   : {'2': 0.55, '3': 0.27, '4': 0.08, '?': 0.04, '1': 0.04, '5+': 0.02}
+  agency  : {True: 0.83, nan: 0.16, False: 0.02}
+
+  closest to centroid (most representative ads):
+    - [2r  54m2  EUR650]  va propun spre chirie un apartament cu 2 camere, decomandat, situat pe strada stirbei voda, intr-o zona centrala a bucurestiului, in imediata apropiere de casa radio, calea plevnei si parcul cismigiu. apartamentul are o suprafata utila de 54 mp, este amplasat la parter si beneficiaza de o compartime…
+
+    - [2r  53m2  EUR550]  gdn bucuresti nord va propune spre inchiriere un apartament semidecomandat cu 2 camere, situat in cartierul pajura, intr-o zona verde si linistita, cu multa intimitate si acces facil catre principalele puncte de interes ale capitalei. apartamentul are o suprafata utila de 53 mp, este situat la etaju…
+
+    - [2r  64m2  EUR559]  4home estate va propune spre inchiriere un apartament decomandat cu doua camere, situat la etajul 6 dintr-un bloc finalizat, in zona cu acces facil la principalele puncte de interes ale bucurestiului. aceasta locatie ofera avantaje precum proximitatea fata de facilitati comerciale, scoli si mijloace…
+
+
+------------------------------------------------------------------------------
+CLUSTER 3 — private landlord, garsoniera / metro-proximity
+------------------------------------------------------------------------------
+  listings      : 1,124  (14.1% of the frame)
+  median rent   : EUR 450/month
+  median area   : 45 m2
+  median EUR/m2 : 10.5
+
+  distinguishing terms (TF-IDF lift vs. the rest of the corpus):
+    garsoniera, inchiriez garsoniera, inchiriez, min, proprietar, metrou, minute, bloc, ap, statia, inchiriere garsoniera, animale, situata, mobilata
+
+  city    : {'Bucuresti': 0.75, 'Iasi': 0.13, 'Cluj-Napoca': 0.12}
+  platform: {'olx': 0.7, 'storia': 0.3}
+  rooms   : {'1': 0.39, '2': 0.37, '?': 0.13, '3': 0.1, '4': 0.02}
+  agency  : {nan: 0.7, True: 0.28, False: 0.02}
+
+  closest to centroid (most representative ads):
+    - [2r  70m2  EUR709]  ofer spre inchiriere apartament 2 camere, 79 mp utili, decomandat, etaj 12 din 18, 3 lifturi, situat intr-o cladire noua 2008, pe strada telega nr.6, aproape metrou jiului. centrala termica proprie, gresie, faianta, parchet, usa metalica, aer conditionat, masina de spalat. apartamentul are o terasa …
+
+    - [2r  70m2  EUR709]  ofer spre inchiriere apartament 2 camere, 79 mp utili, decomandat, etaj 12 din 18, 3 lifturi, situat intr-o cladire noua 2008, pe strada telega nr.6, aproape metrou jiului. centrala termica proprie, gresie, faianta, parchet, usa metalica, aer conditionat, masina de spalat. apartamentul are o terasa …
+
+    - [?r  20m2  EUR400]  se inchiriaza direct de la proprietar o garsoniera micuta si foarte hchic, situata intr-o zona ultracentrala si linistita, la doar 1 minut de piata romana si gradina icoanei. are 20 mp, este situata la parter inalt, intr-un imobil p+7 si este mobilata si utilata conform fotografiilor. un spatiu mic,…
+
+
+------------------------------------------------------------------------------
+CLUSTER 4 — room-by-room descriptive (3-room, two baths, living)
+------------------------------------------------------------------------------
+  listings      : 2,135  (26.9% of the frame)
+  median rent   : EUR 700/month
+  median area   : 72 m2
+  median EUR/m2 : 10.0
+
+  distinguishing terms (TF-IDF lift vs. the rest of the corpus):
+    bai, dormitoare, camera, apartamentul, doua, living, apartament, spatios, familie, doua bai, doua dormitoare, bucatarie, iar, balcoane
+
+  city    : {'Bucuresti': 0.65, 'Cluj-Napoca': 0.2, 'Iasi': 0.15}
+  platform: {'storia': 0.76, 'olx': 0.24}
+  rooms   : {'3': 0.63, '2': 0.14, '4': 0.1, '?': 0.06, '1': 0.06, '5+': 0.01}
+  agency  : {True: 0.75, nan: 0.24, False: 0.02}
+
+  closest to centroid (most representative ads):
+    - [3r  70m2  EUR900]  p299536 ace imobiliare va ofera spre inchiriere un apartament cu 3 camere, situat in zona unirii. locuinta are o suprafata de 70 mp si se afla la etajul 5, intr-un imobil cu regim de inaltime p+10. apartamentul este mobilat si utilat, pregatit pentru noii chiriasi. zona beneficiaza de acces facil la…
+
+    - [3r  93m2  EUR950]  bling imobiliare va propune spre inchiriere un apartament cu 3 camere decomandate, situat in zona bulevardului nicolae titluescu. apartament are o suprafata de 93 mp utili, confort sporit, iar compartimentarea este structurata astfel: 1 hol generos prevazut cu spatii de depozitare, 1 camera de zi, 1…
+
+    - [3r  62m2  EUR600]  suiradiv imobiliare va propune spre inchiriere un apartament modern cu 3 camere semidecomandate , situat pe strada oasului , zona parcul armatura. apartamentul cu o suprafata utila de 62 mp este situat la etajul 4 din 5 , intr-un imobil cu lift , si este luminos, spatios si complet mobilat si utilat…
+
+
+------------------------------------------------------------------------------
+CLUSTER 5 — structured agency template (amenities checklist, cod anunt)
+------------------------------------------------------------------------------
+  listings      : 552  (6.9% of the frame)
+  median rent   : EUR 649/month
+  median area   : 60 m2
+  median EUR/m2 : 10.9
+
+  distinguishing terms (TF-IDF lift vs. the rest of the corpus):
+    dedicata, compartimentare, anunt, accesibilitate, proprietate, sa, centre comerciale, invatamant spatii, inchiriere proprietate, comerciale institutii, multiple, afara, comerciale, moderne
+
+  city    : {'Bucuresti': 0.95, 'Cluj-Napoca': 0.04, 'Iasi': 0.01}
+  platform: {'storia': 0.95, 'olx': 0.05}
+  rooms   : {'2': 0.68, '3': 0.23, '4': 0.04, '1': 0.03, '?': 0.01, '5+': 0.01}
+  agency  : {True: 0.95, nan: 0.05}
+
+  closest to centroid (most representative ads):
+    - [2r  74m2  EUR700]  id proprietate: p20390 descriere generala se ofera spre inchiriere un apartament, situat in panduri, intr-un bloc proprietatea se remarca prin finisaje moderne, compartimentare eficienta, luminozitate, fiind ideala pentru un cuplu, , o familie . destinatie si recomandare recomandat pentru profesioni…
+
+    - [2r  74m2  EUR700]  id proprietate: p20390 descriere generala se ofera spre inchiriere un apartament, situat in panduri, intr-un bloc proprietatea se remarca prin finisaje moderne, compartimentare eficienta, luminozitate, fiind ideala pentru un cuplu, , o familie . destinatie si recomandare recomandat pentru profesioni…
+
+    - [2r  50m2  EUR699]  id proprietate: p20370 descriere generala se ofera spre inchiriere un apartament, situat in ultracentral, intr-un bloc proprietatea se remarca prin finisaje moderne, compartimentare eficienta, luminozitate] fiind ideala pentruun cuplu, un expat, o familie mica destinatie si recomandare recomandat pe…
+
+==============================================================================
+HEDONIC MODEL — rent premium by cluster
+==============================================================================
+
+log(rent) ~ log(area) + rooms + property_type + location + platform
+            + agency + cluster,  HC1 robust standard errors
+
+n = 7,923   R2 = 0.670 (sector FE)   R2 = 0.731 (district FE)
+size elasticity (log_area) = 0.722 (se 0.016)
+baseline cluster = 1 — 2-room agency listing (portal boilerplate)
+
+  raw EUR/m2 gap % : naive comparison, no controls
+  sector-FE %      : controlled, Bucharest sector / city
+  district-FE %    : controlled, 64 city-prefixed district levels
+
+cluster                label    n  raw €/m² gap %  sector-FE %  district-FE %
+      0        APEX template  297            -2.6         -8.3           -5.0
+      1   2-room boilerplate 2753             0.0          0.0            0.0
+      2      premium-segment 1080            20.3         13.1           10.1
+      3 private / garsoniera 1119            -1.9         -3.3           -2.6
+      4         room-by-room 2123            -1.3          1.4            1.7
+      5     agency checklist  551             2.9         -0.7            1.2
+
+95% confidence intervals (sector-FE model):
+cluster                label    n  controlled %  ci_lo  ci_hi
+      0        APEX template  297          -8.3  -11.0   -5.5
+      1   2-room boilerplate 2753           0.0    0.0    0.0
+      2      premium-segment 1080          13.1   10.9   15.4
+      3 private / garsoniera 1119          -3.3   -5.2   -1.4
+      4         room-by-room 2123           1.4   -0.5    3.4
+      5     agency checklist  551          -0.7   -2.9    1.5
+
+==============================================================================
+SECTION 9 — decomposing the premium: phrases vs. cluster
+==============================================================================
+
+Same controls as the district-FE model (log area, rooms, type, 64 districts,
+platform, agency). 'placebo_*' terms carry no quality claim and are the
+control condition.
+
+           term  A: phrases only %  A: ci_lo  A: ci_hi  B: + cluster %
+   premium_word               19.5      17.4      21.6            19.4
+            lux               12.9       9.1      16.8            12.2
+    north_bucha               12.2       9.0      15.6             9.7
+      best_area                0.1      -2.1       2.4             2.8
+  placebo_metro               -1.5      -2.8      -0.3            -1.2
+   placebo_furn               -0.7      -1.8       0.4            -1.1
+cluster 2 dummy                NaN       NaN       NaN             6.2
+
+cluster 2 alone: +13.1%  ->  with phrases in the model: +6.2%
+
+Reading: the neighbourhood phrase ('una dintre cele mai bune zone') is a
+precisely estimated ZERO. The premium sits in 'premium' / 'lux', which
+co-occur with 'finisaje' at 3.7x the corpus rate — i.e. they proxy for
+fit-out quality the model has no column for. Correlational, not causal.
+
+==============================================================================
+SECTION 10 — CLIP cover-photo quality axes
+==============================================================================
+
+image embeddings : 19,680 rows (openai/clip-vit-base-patch32, 512-d)
+scored on        : 7,878 with a description, 17,693 full sample
+
+Axis validation against text the model never saw (gap in SD):
+      description says      axis expected    n  gap (SD) passes
+             nemobilat furnished        −  133    -1.284    yes
+               mobilat furnished        + 4358     0.241    yes
+finisaje premium / lux    luxury        +  249     0.781    yes
+  'premium' (the word)    luxury        + 1143     0.539    yes
+     spatios / generos  spacious        + 2164     0.462    yes
+               luminos    bright        + 1378     0.296    yes
+    renovat / renovare    modern        +  974    -0.120     NO
+
+Does the word survive the photo? (district FE, structural controls)
+        term  words only %  + photo %  ci_lo  ci_hi  explained by photo
+premium_word          19.6       17.0   15.1   18.9                 2.6
+         lux          12.6        9.1    5.6   12.7                 3.5
+ north_bucha          12.2        8.7    5.8   11.8                 3.5
+   best_area           0.1        1.9   -0.3    4.2                -1.8
+
+What the photo is worth, per +1 SD:
+     axis  % per +1 SD  ci_lo  ci_hi
+   modern          5.2    4.6    5.8
+   luxury          2.6    1.9    3.3
+   bright          3.4    2.8    4.0
+furnished         -0.6   -1.2   -0.1
+ spacious         -0.1   -0.8    0.7
+
+R2 ladder (same rows): structure only 0.7244, + words 0.7505, + photo 0.7654, + words + photo 0.7834
+Full sample (n=17,693): structure 0.7442 -> +photo 0.7856
+
+Reading: one cover photo adds +4.1 R2 points over structure and beats the
+description. But controlling for how the flat LOOKS moves 'premium' only from
++19.6% to +17.0% — the photo corroborates the adjective without accounting
+for it. Cover photo only; CLIP-base-32; still correlational.
+
+==============================================================================
+SECTIONS 11-12 — boilerplate stripping, and the full photo gallery
+==============================================================================
+
+11. BOILERPLATE STRIPPING (verbatim sentences in >=5 listings; 84.5% of text kept)
+
+  Cramer's V vs structure:  rooms 0.359 -> 0.212 | platform 0.425 -> 0.375
+                            agency 0.304 -> 0.271
+  BUT a classifier still recovers rooms from the stripped vectors at 77.9%
+  (raw: 78.1%) — the information was never removed, only de-emphasised, and
+  the agency clusters (APEX, ACE, 4Home) survive because identity lives in
+  writing STYLE, not repeated strings. Masking numbers made it worse.
+  New thematic cluster (premium/finisaje/Herastrau, n=2,551): +7.5% (see notebook for all six)
+
+12. GALLERY SAMPLE (11,502 photos, 1,192 listings)
+
+            model  params     R²  adj R²  CV R²
+        structure      39 0.6673  0.6559 0.6400
+          + cover      44 0.7282  0.7177 0.7065
+        + gallery      54 0.7684  0.7574 0.7458
++ cover + gallery      59 0.7715  0.7596 0.7474
+          + words      43 0.7189  0.7084 0.6922
+  + words + cover      48 0.7663  0.7564 0.7447
++ words + gallery      58 0.7963  0.7858 0.7732
+
+  The cover adds nothing once the gallery mean is known (CV 0.7474 vs 0.7458):
+  it is a noisy sample of the average. modern_mean is worth +10.9%/SD; every
+  'max' and 'std' term is insignificant — flats price on overall standard, not
+  on their best room.
+
+            model  premium %  ci_lo  ci_hi
+          + words       28.3   22.8   34.0
+  + words + cover       25.4   20.5   30.5
++ words + gallery       21.6   17.1   26.3
+
+  A quarter of the word 'premium' survives nine photos of evidence.

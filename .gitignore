@@ -64,3 +64,19 @@ Deprecated functions/
 # ── Misc local files ──────────────────────────────────────────────────────────
 run_crawler.bat
 CLAUDE.md
+
+# Cached analysis pulls (regenerate with analysis/fetch_cache.py)
+analysis/cache/
+
+# Ad hoc analysis intermediates (embeddings, projections, merged frames —
+# regenerate by re-running the notebook in "ad hoc analysis/")
+ad hoc analysis/cache/
+
+# Benchmark data containing scraped OLX/Storia listing text. Landlords' phone
+# numbers appear in the descriptions (~25 per file) and this repo is public:
+# keep these local. Reports (.md) and the hand-written
+# filter_extraction_samples.jsonl are safe and stay tracked.
+benchmarks/data/*_predictions.*
+benchmarks/data/olx_validation_set.jsonl
+benchmarks/data/olx_validation_set.csv
+benchmarks/data/enrichment_samples.jsonl

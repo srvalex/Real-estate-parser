@@ -25,7 +25,8 @@ Working demo with the following complete:
 - **Price fairness indicator** — `apply_price_fairness()` in `pipeline/utils.py`: aggregates avg price per (district, rooms) bucket from Supabase, adds `price_fairness` column to df, rendered as green/red badge on listing cards.
 - **Embedder Cloud Run Job** (`embedder-job`, europe-west1, 4Gi) — replaces the always-on Cloud Run Service (deleted May 2026, was costing ~$1/day from `--min-instances 1`). `embedding-service/embed_job.py` loads ST + CLIP locally, runs text + image backfill against Supabase, exits. Triggered by `_trigger_embedder_job()` in `crawler.py` at the end of each crawl. Build via `embedding-service/cloudbuild.yaml` (project-root context required for `db_utils.py`).
 - **Post-crawl embedding** — split into two steps: (1) `run_text_backfill()` inline in crawler (ST model baked into crawler image, completes in seconds); (2) `_trigger_embedder_job()` fires `embedder-job` asynchronously for image embeddings (CLIP, slower). Streamlit query-time text embedding uses local `@st.cache_resource` ST model — no cloud service dependency.
-- **Analytics dashboard** — `components/analytics.py`: interactive Plotly charts (price distribution, avg rent by sector, neighbourhood drilldown, rooms breakdown, platform split, rent vs area scatter). Property type + rooms multiselect filters. `price_eur_normalized` column converts RON→EUR at 5.1 rate so RON listings participate in all price charts. Data pre-filtered to `is_available=1 AND property_type IS NOT NULL` at DB level.
+- **Market analytics service + internal dashboard** — the analytics stack is deliberately split from the renter-facing one, so the aggregate market picture (the asset `MONETIZATION_PLAN.md` expects to sell) isn't reachable from the surface renters use. `api/analytics.py` reduces `listings` rows to statistics; `api/analytics_app.py` is a **separate** FastAPI process (:8100) guarding them behind `X-Analytics-Token` and returning aggregates only — no endpoint hands back a listing. `analytics_ui/` is a standalone Next.js app (:3100) that renders them; the token stays in its Node process and never reaches the browser. The public API has no `/analytics` route and the analytics API has no `/listings` route — asserted in `tests/api/test_analytics_app.py`.
+- **Analytics dashboard (Streamlit, legacy)** — `components/analytics.py`: interactive Plotly charts (price distribution, avg rent by sector, neighbourhood drilldown, rooms breakdown, platform split, rent vs area scatter). Property type + rooms multiselect filters. `price_eur_normalized` column converts RON→EUR at 5.1 rate so RON listings participate in all price charts. Data pre-filtered to `is_available=1 AND property_type IS NOT NULL` at DB level.
 - **districts.json** expanded to 120 neighbourhoods (was 87) — cross-referenced against live Supabase `district` values; all missing Bucharest neighbourhoods added to correct sectors.
 - **Multi-dimension search filters** — rooms, area (min/max m²), property type (Apartament / Garsonieră / Casă / Vilă) filter controls added to the main search UI. `apply_filters` extended with `min_sqm`, `max_sqm`, `property_types` parameters; listings without those columns are always kept (no data-loss penalty).
 - **NLP auto-fill** — if a filter field is left at its default (rooms="Any", all property types, sqm=0, price=0), `extract_filters` fills it from the vibe prompt automatically. Form always wins; NLP only acts on untouched fields. Extracted fields: `ROOM_COUNT`, `PROPERTY_TYPE`, `AREA_MIN`, `AREA_MAX`, `PRICE_MAX`. User notified via toast.
@@ -198,8 +199,13 @@ Impact: inflated listing counts and price averages in analytics; duplicated card
 
 ### Planned implementation
 
+**Sequencing (decided in `GEO_EXPANSION_PLAN.md`, 2026-08-29):** land this
+alongside that plan's Phase 2 (remaining-cities rollout), not after —
+dedup value scales with listings-per-metro, so shipping new cities without
+it first launches each one with pre-inflated analytics.
+
 #### 5.1 Canonical URL fingerprint (cheap, high-coverage)
-- Add `content_hash` column to `listings`: MD5 of `(normalised_title, price_numeric, district, rooms)` — normalise by stripping diacritics, lowercase, trimming whitespace.
+- Add `content_hash` column to `listings`: MD5 of `(city, normalised_title, price_numeric, district, rooms)` — normalise by stripping diacritics, lowercase, trimming whitespace. **`city` included since `GEO_EXPANSION_PLAN.md`**: once `district` names are no longer globally unique across cities, omitting `city` here risks a false cross-city match.
 - On upsert, compute hash. If a row with the same hash already exists on a different platform, set `canonical_url` → the existing row's URL (prefer Storia/Imobiliare over OLX for richer data).
 - Cost: one DB read per upsert (or a nightly dedup pass).
 
@@ -251,6 +257,53 @@ These were originally Month 2/3. Moved down because infrastructure (P1-P4) must 
 ---
 
 ## Month 4 — Monetization Foundation
+
+### 4.0 Revenue model: credit top-up, gating AI-ranked search (decided 2026-08-30)
+
+**Why not a subscription:** usage here is a short, intense burst (2–8 weeks
+actively hunting) followed by zero need until the next move — for students,
+that's roughly annual, not continuous. A monthly subscription either gets
+cancelled the moment a lease is signed (capturing ~1 month of revenue per
+user) or delays signup until deep into the hunt to dodge paying for unused
+weeks. A credit/top-up model fits the actual usage shape instead: buy once
+per hunt, spend it down over the search, dormant balance carries over to
+the next hunt with no cancel-or-get-charged-again risk.
+
+**What consumes a credit:** only AI-ranked (vibe/image) search — the
+`embed_query` + `apply_ai_scores` stage ("stage 2" in `MIGRATION_PLAN.md`'s
+search design), which is the app's actual differentiator vs. OLX/Storia/
+Imobiliare's own free filters. Plain filtered search (district/price/rooms/
+type — "stage 1," equivalent to what those platforms already offer for
+free) **stays free and unlimited, forever** — the app can't paywall access
+to data it doesn't own, so the credit model only ever gates the ranking
+layer built on top of it. 1 credit = 1 *new* vibe-text/filter combination
+ranked; re-sorting or paginating an already-ranked result set is free, not
+a second charge.
+
+**New-account trial (one-time, not renewing):** 1 free AI-ranked search +
+3 free plain filtered searches, then filtered search remains free
+indefinitely and AI-ranked search requires credits. Not an ongoing daily/
+session allowance — a single taste of both before any purchase decision.
+
+**Expiry:** none, or measured in years, not months/days — matches the
+sparse-annual-reuse pattern (see above). A monthly-expiring credit would
+recreate the same mismatch a subscription has.
+
+**Pricing (pack size, price-per-credit):** intentionally left unset — a
+business decision to make once usage data exists, not something to guess
+at now.
+
+**Infra prerequisite, shared with 3.4 (Price Drop Alerts):** both this and
+saved-search alerts need *some* persistent user identity to track state
+(credit balance / saved search) — 3.4 already flagged "requires user
+accounts, email only for MVP." Build that once, serve both features,
+rather than twice.
+- `user_credits` (balance) + `credit_transactions` (purchase / spend /
+  refund audit log) tables in Supabase.
+- Atomic decrement at the vibe-ranking call site (e.g.
+  `UPDATE user_credits SET balance = balance - 1 WHERE user_id = ... AND
+  balance >= 1 RETURNING balance`) to avoid a double-spend race if two
+  AI-ranked searches fire concurrently.
 
 ### 4.1 User interaction logging
 The app's long-term moat is proprietary interaction data. Log from day one:
@@ -319,7 +372,8 @@ preference_vector = mean([embed(img) for img in liked_photos])
 | Post-crawl embedding backfill | P4 | ✅ Done | Required | Medium |
 | Supabase image embeddings (pgvector) | P4 | ✅ Done | Required | Medium |
 | Availability check as dedicated job | P4 | ✅ Done | Ops hygiene | Low |
-| Analytics dashboard | Done | ✅ Done | High | Medium |
+| Analytics dashboard (Streamlit) | Done | ✅ Done | High | Medium |
+| Market analytics service + internal dashboard (`analytics_ui`) | Done | ✅ Done | High | Medium |
 | RON→EUR price normalisation | Done | ✅ Done | Data quality | Low |
 | districts.json expanded (87→120) | Done | ✅ Done | Data quality | Low |
 | OLX district backfill from URL slug | Done | ✅ Done | Data quality | Low |
