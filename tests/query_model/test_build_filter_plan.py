@@ -91,3 +91,20 @@ class ExtrasFieldTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ListedByPathTests(unittest.TestCase):
+    """listed_by used to point at extras.advertiserType, whose Storia values
+    are "business"/"private" — so filtering on its declared known_values
+    ("AGENCY"/"PRIVATE") could never match a row. extras.advertType is the
+    field that actually holds AGENCY/PRIVATE."""
+
+    def test_listed_by_filters_on_advert_type_not_advertiser_type(self):
+        plan = build_filter_plan(ListingQuery(
+            extras=[ExtraFilter(key="listed_by", op="eq", value="AGENCY")],
+        ))
+        (group,) = plan.or_groups
+        (cond,) = group.conditions
+        self.assertEqual(cond.column, "extras->>advertType")
+        self.assertEqual(cond.op, "eq")
+        self.assertEqual(cond.value, "AGENCY")

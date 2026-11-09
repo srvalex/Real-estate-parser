@@ -193,7 +193,13 @@ def render_home(districts, proximity, server_url):
         all_districts = final_selection + proximity_selection
         with st.spinner("⚡ Se încarcă anunțurile..."):
             from db_utils import query_listings_by_district
-            records = query_listings_by_district(all_districts, max_price_eur=max_price)
+            # city="Bucuresti": this UI only ever offers Bucharest districts
+            # (streamlit_interface/districts.json), but neighbourhood names
+            # are no longer globally unique now that Cluj-Napoca/Iasi data
+            # exists too (GEO_EXPANSION_PLAN.md Phase 0) — without this,
+            # e.g. selecting "Dacia" here would silently also pull in
+            # Iasi's "Dacia" listings.
+            records = query_listings_by_district(all_districts, max_price_eur=max_price, city="Bucuresti")
 
         if proximity_selection:
             st.toast(f"🔍 S-au adăugat {len(proximity_selection)} cartiere învecinate", icon="🔍")

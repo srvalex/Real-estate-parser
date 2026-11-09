@@ -219,6 +219,16 @@ def apply_ai_scores(df, vibe: str, url_col: str, embed_query, image_embedding: l
         final_scores = {url: s / _max for url, s in final_scores.items()}
 
     df["_similarity_score"] = df[url_col].map(final_scores)
+    # Per-channel raw scores, kept alongside the fused RRF score — the caller
+    # (api/main.py) surfaces these separately (ScoredListing.textSimilarity /
+    # .imageSimilarity) so the UI can show "why" a result matched (text vs.
+    # photo similarity) rather than only the single combined percentage.
+    # Absent entirely when that channel didn't run, same has-vibe/has-image
+    # gating as above — never a fabricated 0.
+    if text_scores:
+        df["_text_similarity"] = df[url_col].map(text_scores)
+    if image_scores:
+        df["_image_similarity"] = df[url_col].map(image_scores)
     df = df.sort_values("_similarity_score", ascending=False, na_position="last").reset_index(drop=True)
     return df, True, embed_error
 

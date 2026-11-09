@@ -13,9 +13,17 @@ with another city's sector.
 """
 import json
 import os
+import re
 from functools import lru_cache
 
 _CITIES_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "cities.json")
+
+# Some listings name their sector directly instead of a neighbourhood —
+# "Sectorul 3", "Sector 3", "sectorul 3". Confirmed live 2026-09-08: 167
+# available Bucharest listings carry one of these as their `district`, and
+# a neighbourhood-only lookup dropped every one of them out of the sector
+# charts even though the row states its sector unambiguously.
+_SELF_DECLARED_SECTOR = re.compile(r"^\s*sector(?:ul)?\s*([1-6])\s*$", re.IGNORECASE)
 
 
 @lru_cache(maxsize=1)
@@ -35,7 +43,32 @@ def _sector_by_city_neighborhood() -> dict:
     return result
 
 
+def known_cities() -> list[str]:
+    """Every city in api/data/cities.json, alphabetically. The analytics
+    service validates its `city` param against this so an arbitrary string
+    can't be pushed into a Supabase filter."""
+    return sorted(_cities().keys())
+
+
+def city_has_sectors(city: str) -> bool:
+    """True only for cities with a sector layer (București today). Analytics
+    uses this to tell "this listing's sector is missing" apart from "this
+    city has no sectors at all" — without it, every Cluj and Iași listing
+    would be reported as an unattributed Bucharest-style gap."""
+    return isinstance(_cities().get(city), dict)
+
+
 def sector_for(city: str, neighborhood: str) -> str:
     """Best-effort lookup — "" when the city has no sector layer or the
-    neighbourhood isn't in the known list, rather than raising."""
+    neighbourhood isn't in the known list, rather than raising.
+
+    A `neighborhood` that names a sector outright ("Sectorul 3") resolves to
+    that sector: the row is already telling us the answer, and refusing it
+    for not being a neighbourhood name only loses data.
+    """
+    if not city_has_sectors(city):
+        return ""
+    direct = _SELF_DECLARED_SECTOR.match(neighborhood or "")
+    if direct:
+        return f"Sector {direct.group(1)}"
     return _sector_by_city_neighborhood().get((city, neighborhood), "")

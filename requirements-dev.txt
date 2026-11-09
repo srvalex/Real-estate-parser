@@ -85,3 +85,4 @@ torch
 # CLIP text + vision towers (image search / template photo picker)
 transformers
 pillow
+tiktoken==0.14.0
