@@ -87,6 +87,24 @@ ALTER TABLE listings ADD COLUMN IF NOT EXISTS city TEXT;
 UPDATE listings SET city = 'Bucuresti' WHERE city IS NULL;
 CREATE INDEX IF NOT EXISTS idx_listings_city_district ON listings (city, district);
 
+-- 4d. Seller type: 'agency' | 'private', NULL when unknown. Storia-only —
+--     OLX has no extras and Imobiliare's extras carry no seller info.
+--     Derived from extras->>'advertType' (Storia's own ad-level label, the
+--     same one its ownerTypeSingleSelect search filter uses). Written by
+--     db_utils._clean_record on every new upsert; backfilled once below.
+--     Checked live 2026-09-12 on 1000 Storia rows: advertType, owner.type,
+--     contactDetails.type and target.user_type agree on 997; the other 3
+--     are advertType=AGENCY on a business account with no agency object —
+--     advertType wins. ~10% of old Storia rows have extras = NULL and stay
+--     NULL here.
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS seller_type TEXT;
+UPDATE listings
+   SET seller_type = lower(extras->>'advertType')
+ WHERE seller_type IS NULL
+   AND platform_id = 'storia'
+   AND upper(extras->>'advertType') IN ('AGENCY', 'PRIVATE');
+CREATE INDEX IF NOT EXISTS idx_listings_seller_type ON listings (seller_type);
+
 -- 5. Text similarity search function (used in P2.3 to replace ChromaDB web_archive)
 --
 --    candidate_urls (added later): when given, scores EVERY url in that

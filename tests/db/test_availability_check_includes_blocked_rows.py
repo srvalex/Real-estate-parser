@@ -22,7 +22,10 @@ class AvailabilityCheckIncludesBlockedRowsTests(unittest.TestCase):
         table.select.return_value = table
         table.or_.return_value = table
         table.eq.return_value = table
+        table.order.return_value = table
         table.range.return_value = table
+        table.gt.return_value = table
+        table.limit.return_value = table
         table.execute.return_value = fake_resp
 
         client = Mock()

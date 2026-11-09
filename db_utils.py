@@ -89,7 +89,7 @@ _CANONICAL_COLUMNS = frozenset({
     "city", "district", "location_full",
     "rooms", "area_sqm", "floor", "total_floors", "year_built", "heating",
     "features", "image_urls", "extras",
-    "property_type",
+    "property_type", "seller_type",
     "is_available", "scraped_at", "first_seen_at", "last_seen_at",
     "embedding", "image_embedding",
 })
@@ -388,6 +388,14 @@ def _clean_record(item: dict) -> dict | None:
         elif clean.get("title"):
             clean["property_type"] = "Apartament"
 
+    # 6b. seller_type: 'agency' | 'private' from Storia's extras.advertType
+    #     (see supabase_schema.sql 4d). Other platforms have no such field,
+    #     so the column stays NULL for them.
+    if not clean.get("seller_type") and isinstance(clean.get("extras"), dict):
+        advert_type = str(clean["extras"].get("advertType") or "").lower()
+        if advert_type in ("agency", "private"):
+            clean["seller_type"] = advert_type
+
     # 7. Fold columns that don't exist in the canonical schema into `extras`
     #    instead of discarding them. Originally these were just dropped —
     #    that already caused one real production bug silently (Milestone 19:
@@ -467,7 +475,20 @@ def _upsert_batch(client: Client, batch: list[dict], table: str, max_retries: in
 # ─────────────────────────────────────────────
 
 def save_to_db(data_list: list[dict], table: str = "listings") -> None:
-    """Upsert a list of listing dicts into Supabase."""
+    """Upsert a list of listing dicts into Supabase.
+
+    Stamps last_seen_at on every record confirmed live (is_available == 1)
+    right before upserting. Without this, a recheck that re-scrapes a still
+    -live listing (crawler.run_availability_check's "success" branch, for
+    every platform) goes straight through this function with a full parsed
+    record and never touches last_seen_at at all — since _clean_record()
+    never sets it and Supabase upsert only updates columns present in the
+    payload — leaving it frozen at its insert-time default forever. Setting
+    it here (not in _clean_record itself) keeps _clean_record a pure,
+    deterministic mapper — demo/clean_listing.py previews its output
+    directly and tests/db/test_clean_record.py asserts on it verbatim;
+    neither should have to account for a wall-clock timestamp.
+    """
     if not data_list:
         return
 
@@ -476,6 +497,12 @@ def save_to_db(data_list: list[dict], table: str = "listings") -> None:
 
     if not cleaned:
         return
+
+    from datetime import datetime
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    for row in cleaned:
+        if row.get("is_available") == 1:
+            row["last_seen_at"] = now
 
     total_saved, total_failed = 0, 0
     chunk_size = 500
@@ -771,14 +798,40 @@ def get_all_db_urls(table: str = "listings") -> set[str]:
 def get_listings_for_availability_check(
     platform_id: str | None = None,
     limit: int | None = None,
+    skip_seen_within_hours: float | None = None,
 ) -> list[dict]:
     """Return [{url, platform_id, city}] for listings not yet confirmed expired.
+
+    Rows come back stalest-first (last_seen_at ascending, NULL first). A run
+    that dies partway — Cloud Run's task timeout killed a ~27k-listing
+    check mid-OLX and the automatic retry restarted from the top, redoing
+    every listing it had just verified — now resumes with the unchecked
+    rows first, because each confirmed-live row's last_seen_at was just
+    stamped. Blocked rows are never stamped, so they stay at the front too.
+
+    The stalest-first sort happens here in Python, deliberately NOT as a
+    PostgREST .order("last_seen_at"): the listings table has no index on
+    last_seen_at, and a server-side sort over this OR-filtered set took 5-8s
+    per page and tripped Supabase's statement timeout (57014) — which an
+    earlier version of this function swallowed, so the 2026-10-07 scheduled
+    run reported "Nothing to check" and success while having done nothing.
+    Paging is by keyset on url (see the loop); sorting ~20k small rows
+    client-side is negligible.
+
+    If skip_seen_within_hours is set, rows whose last_seen_at is newer than
+    that many hours ago are left out entirely (they were just confirmed
+    live), so a retry or a back-to-back manual run only does the remaining
+    work instead of the whole queue again.
 
     Includes is_available=1 (re-confirm still live), NULL (never checked),
     and -1 (blocked/transient on a prior attempt — must be retried, not left
     in limbo forever). Skips is_available=0 (already confirmed expired — no
     point re-checking).
-    If limit is set, returns at most that many rows.
+    If limit is set, returns at most that many rows (the stalest ones).
+
+    A page that fails 3 times raises instead of returning a short or empty
+    list: callers treat an empty result as "nothing to check", so swallowing
+    the error would silently turn an outage into a successful no-op run.
 
     `city` is selected alongside url/platform_id so a recheck can tell OLX's
     scrape_listing_with_status which city a row belongs to (it gates
@@ -786,35 +839,64 @@ def get_listings_for_availability_check(
     Cluj/Iași row would silently default to "Bucuresti" and risk a
     false-positive district match.
     """
+    from datetime import datetime, timedelta, timezone
     client = get_client()
     rows: list[dict] = []
-    offset, page_size = 0, 1000
+    page_size = 1000
+    last_url: str | None = None
 
+    cutoff = None
+    if skip_seen_within_hours:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=skip_seen_within_hours)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Keyset pagination on url (unique, indexed): url > last_url ORDER BY url
+    # LIMIT n. NOT .range()/OFFSET — without an ORDER BY, Postgres returns
+    # arbitrary page boundaries, and measured live (2026-10-07) 25-40% of the
+    # rows an offset-paginated fetch returned were duplicates, so 5-8k of the
+    # ~20k queued listings were silently never returned in a given run. With
+    # ORDER BY url the page boundaries are exact, and keyset avoids the
+    # deep-OFFSET cost that made ordered offset paging time out.
     while True:
-        try:
-            q = (
-                client.table("listings")
-                .select("url, platform_id, city")
-                .or_("is_available.eq.1,is_available.eq.-1,is_available.is.null")
-            )
-            if platform_id:
-                q = q.eq("platform_id", platform_id)
-            resp = q.range(offset, offset + page_size - 1).execute()
-            batch = resp.data or []
-            if limit is not None:
-                remaining = limit - len(rows)
-                if remaining <= 0:
-                    break
-                batch = batch[:remaining]
-            rows.extend(batch)
-            if len(batch) < page_size or (limit is not None and len(rows) >= limit):
-                break
-            offset += page_size
-        except Exception as e:
-            print(f"  [supabase] get_listings_for_availability_check failed: {e}")
-            break
+        q = (
+            client.table("listings")
+            .select("url, platform_id, city, last_seen_at")
+            .or_("is_available.eq.1,is_available.eq.-1,is_available.is.null")
+        )
+        if cutoff:
+            q = q.or_(f"last_seen_at.is.null,last_seen_at.lt.{cutoff}")
+        if platform_id:
+            q = q.eq("platform_id", platform_id)
+        if last_url is not None:
+            q = q.gt("url", last_url)
+        q = q.order("url").limit(page_size)
 
-    return rows
+        # This table sits close to Supabase's 8s statement_timeout, so an
+        # individual page occasionally spikes (seen live: one page timed out
+        # twice back-to-back, then served in 0.6s). Retry with backoff; only a
+        # persistent failure raises.
+        for attempt in range(3):
+            try:
+                resp = q.execute()
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                wait = 2 ** attempt  # 1s, 2s
+                print(f"  [supabase] get_listings_for_availability_check page after {last_url!r} failed ({e}), retry {attempt + 1}/2 in {wait}s…")
+                time.sleep(wait)
+
+        batch = resp.data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        last_url = batch[-1]["url"]
+
+    rows.sort(key=lambda r: (r.get("last_seen_at") is not None, r.get("last_seen_at") or "", r.get("url") or ""))
+    if limit is not None:
+        rows = rows[:limit]
+    return [{k: v for k, v in r.items() if k != "last_seen_at"} for r in rows]
 
 
 def batch_update_availability(updates: list[dict]) -> int:
@@ -1092,12 +1174,18 @@ def search_by_image_embedding(
         return {}
 
 
-def fetch_analytics_data() -> list[dict]:
+def fetch_analytics_data(city: str | None = None) -> list[dict]:
     """Fetch all listings with the columns needed for the analytics dashboard.
 
     Returns a flat list of dicts — safe to pass directly to pd.DataFrame().
     Only analytics-relevant columns are selected to keep payload small.
     Pre-filtered to available listings with a known property_type.
+
+    `city` scopes the result to one city (GEO_EXPANSION_PLAN.md Phase 0);
+    None means every city, which is what the all-cities dashboard view
+    wants. `city` is also selected unconditionally — api/analytics.py needs
+    it to resolve a neighbourhood to its sector, and that lookup is keyed by
+    (city, neighbourhood) because neighbourhood names collide across cities.
     """
     client = get_anon_client()
     rows: list[dict] = []
@@ -1105,17 +1193,18 @@ def fetch_analytics_data() -> list[dict]:
 
     while True:
         try:
-            resp = (
+            query = (
                 client.table("listings")
                 .select(
-                    "platform_id, district, title, price_numeric, price_currency, "
+                    "platform_id, city, district, title, price_numeric, price_currency, "
                     "rooms, area_sqm, is_available, scraped_at, first_seen_at, property_type"
                 )
                 .eq("is_available", 1)
                 .not_.is_("property_type", "null")
-                .range(offset, offset + page_size - 1)
-                .execute()
             )
+            if city:
+                query = query.eq("city", city)
+            resp = query.range(offset, offset + page_size - 1).execute()
             batch = resp.data or []
             rows.extend(batch)
             if len(batch) < page_size:

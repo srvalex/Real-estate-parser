@@ -186,7 +186,10 @@ class WriteFunctionsUseServiceRoleClientTests(unittest.TestCase):
         table.select.return_value = table
         table.or_.return_value = table
         table.eq.return_value = table
+        table.order.return_value = table
         table.range.return_value = table
+        table.gt.return_value = table
+        table.limit.return_value = table
         table.execute.return_value = MagicMock(data=[])
 
         db_utils.get_listings_for_availability_check()

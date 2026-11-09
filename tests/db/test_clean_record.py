@@ -229,3 +229,40 @@ class NonCanonicalColumnStrippingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SellerTypeTests(unittest.TestCase):
+    """seller_type is derived from Storia's extras.advertType (AGENCY/PRIVATE)."""
+
+    def test_storia_agency_advert_type_becomes_lowercase_agency(self):
+        result = db_utils._clean_record({
+            "url": "https://example.com/x",
+            "extras": {"advertType": "AGENCY", "advertiserType": "business"},
+        })
+        self.assertEqual(result["seller_type"], "agency")
+
+    def test_storia_private_advert_type_becomes_private(self):
+        result = db_utils._clean_record({
+            "url": "https://example.com/x",
+            "extras": {"advertType": "PRIVATE"},
+        })
+        self.assertEqual(result["seller_type"], "private")
+
+    def test_unknown_advert_type_value_leaves_seller_type_unset(self):
+        result = db_utils._clean_record({
+            "url": "https://example.com/x",
+            "extras": {"advertType": "DEVELOPER"},
+        })
+        self.assertNotIn("seller_type", result)
+
+    def test_no_extras_leaves_seller_type_unset(self):
+        result = db_utils._clean_record({"url": "https://example.com/x"})
+        self.assertNotIn("seller_type", result)
+
+    def test_explicit_seller_type_is_not_overwritten(self):
+        result = db_utils._clean_record({
+            "url": "https://example.com/x",
+            "seller_type": "private",
+            "extras": {"advertType": "AGENCY"},
+        })
+        self.assertEqual(result["seller_type"], "private")

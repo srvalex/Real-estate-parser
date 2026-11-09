@@ -61,6 +61,28 @@ class OlxDetectionTests(unittest.TestCase):
             result = OLXScraper().scrape_listing_with_status("https://www.olx.ro/d/oferta/test-ID1.html")
         self.assertEqual(result["status"], "expired")
 
+    def test_http_404_is_expired(self):
+        """OLX now answers 404 (not 410) for removed ads. Confirmed live
+        2026-10-14: 16/16 sampled stuck "available" rows returned a bare 404.
+        Classified as blocked, they were retried forever and never expired."""
+        with patch("curl_cffi.requests.get", return_value=_fake_response(404, text="")):
+            result = OLXScraper().scrape_listing_with_status("https://www.olx.ro/d/oferta/test-ID404.html")
+        self.assertEqual(result["status"], "expired")
+
+    def test_http_404_with_a_body_is_still_expired(self):
+        with patch("curl_cffi.requests.get", return_value=_fake_response(404, text=LIVE_LISTING_HTML)):
+            result = OLXScraper().scrape_listing_with_status("https://www.olx.ro/d/oferta/test-ID404b.html")
+        self.assertEqual(result["status"], "expired")
+
+    def test_bot_protection_and_server_errors_stay_blocked(self):
+        """Only 404/410 are positive evidence the ad is gone. Rate limiting,
+        challenges and transient 5xx must never expire a listing."""
+        for code in (401, 403, 429, 500, 502, 503):
+            with self.subTest(status=code), \
+                 patch("curl_cffi.requests.get", return_value=_fake_response(code, text="")):
+                result = OLXScraper().scrape_listing_with_status("https://www.olx.ro/d/oferta/test-IDx.html")
+            self.assertEqual(result["status"], "blocked")
+
     def test_soft_deleted_banner_with_200_status_is_expired(self):
         with patch("curl_cffi.requests.get", return_value=_fake_response(200, text=SOFT_DELETED_HTML)):
             result = OLXScraper().scrape_listing_with_status("https://www.olx.ro/d/oferta/test-ID2.html")
@@ -82,7 +104,7 @@ class OlxDetectionTests(unittest.TestCase):
             result = OLXScraper().scrape_listing_with_status("https://www.olx.ro/d/oferta/test-ID4.html")
         self.assertEqual(result["status"], "blocked")
 
-    def test_non_200_non_410_status_is_blocked(self):
+    def test_non_200_non_404_non_410_status_is_blocked(self):
         with patch("curl_cffi.requests.get", return_value=_fake_response(403, text="Forbidden")):
             result = OLXScraper().scrape_listing_with_status("https://www.olx.ro/d/oferta/test-ID5.html")
         self.assertEqual(result["status"], "blocked")

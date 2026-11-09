@@ -12,6 +12,10 @@ Usage:
   python crawler.py --mode availability-check
   python crawler.py --mode availability-check --platform olx
 
+Proxy source, in priority order: --proxy-file, then the Webshare API when
+WEBSHARE_API_KEY is set (list fetched fresh each run), then the static
+PROXY_LIST env var.
+
 proxies.txt format (one proxy per line, lines starting with # are ignored):
   http://user:pass@gate.smartproxy.com:10000
   http://user:pass@gate.smartproxy.com:10001
@@ -69,6 +73,9 @@ class ProxyRotator:
     """
 
     _STATE_FILE = os.path.join(os.path.dirname(__file__), ".crawler_proxy_state.json")
+
+    # Platforms whose scraper actually routes through the session proxy.
+    PROXIED_PLATFORMS = frozenset({"storia"})
 
     # Wall-clock budget for the whole apply_for_session() health-check loop.
     # Each individual request already has its own timeout (10-15s), which
@@ -134,6 +141,67 @@ class ProxyRotator:
         print(f"  [proxies] loaded {len(proxies)} proxy(s) from PROXY_LIST env var")
         return cls(proxies)
 
+    _WEBSHARE_LIST_URL = "https://proxy.webshare.io/api/v2/proxy/list/"
+
+    @classmethod
+    def from_webshare(cls, api_key: str, mode: str = "direct") -> "ProxyRotator":
+        """Fetch the current proxy list straight from the Webshare API.
+
+        Webshare rotates/refreshes credentials and replaces dead proxies on
+        its side, so a list exported by hand goes stale (all 100 proxies in
+        the proxy-list secret started returning HTTP 407 and every Storia
+        recheck ran unproxied and got blocked). Pulling the list per run
+        means there's nothing to re-export. Proxies Webshare itself marks
+        valid=false are dropped. Raises on any HTTP/parse failure — callers
+        decide the fallback; the API key is never included in the message.
+        """
+        import requests
+
+        proxies: list[str] = []
+        url: str | None = cls._WEBSHARE_LIST_URL
+        params: dict | None = {"mode": mode, "page": 1, "page_size": 100}
+        while url:
+            resp = requests.get(
+                url,
+                params=params,
+                headers={"Authorization": f"Token {api_key}"},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            for p in body.get("results", []):
+                if p.get("valid") is False:
+                    continue
+                proxies.append(
+                    f"http://{p['username']}:{p['password']}@{p['proxy_address']}:{p['port']}"
+                )
+            url, params = body.get("next"), None  # `next` is a full URL
+        print(f"  [proxies] loaded {len(proxies)} valid proxy(s) from Webshare API")
+        return cls(proxies)
+
+    @classmethod
+    def from_config(cls, proxy_file: str | None = None) -> "ProxyRotator":
+        """Pick the proxy source: --proxy-file, else the Webshare API
+        (WEBSHARE_API_KEY), else the static PROXY_LIST env var.
+
+        A Webshare failure (network, bad key, empty list) falls back to
+        PROXY_LIST when it's set rather than silently crawling unproxied.
+        """
+        if proxy_file:
+            return cls.from_file(proxy_file)
+        api_key = os.environ.get("WEBSHARE_API_KEY", "").strip()
+        if api_key:
+            try:
+                rotator = cls.from_webshare(api_key)
+                if rotator._proxies:
+                    return rotator
+                print("  [proxies] Webshare API returned no valid proxies")
+            except Exception as e:
+                print(f"  [proxies] Webshare API fetch failed ({type(e).__name__}) — falling back")
+        if os.environ.get("PROXY_LIST"):
+            return cls.from_env()
+        return cls([])
+
     def _load_index(self) -> int:
         try:
             with open(self._STATE_FILE, encoding="utf-8") as f:
@@ -159,29 +227,6 @@ class ProxyRotator:
                 timeout=10,
             )
             return r.status_code == 200
-        except Exception:
-            return False
-
-    def _verify_for_olx(self, proxy_url: str) -> bool:
-        """Return True if the proxy is NOT blocked by OLX's anti-bot layer.
-
-        Fetches a stable search page and checks for the l-card listing-card
-        marker — present on every real OLX search results page (the same
-        marker collect_links() itself relies on), absent on a rate-limited
-        or bot-challenge response. Added after a real listing that returned
-        a clean HTTP 410 (expired) via a direct connection was separately
-        observed coming back "blocked" through the crawler's proxy path —
-        OLX was the only platform with no proxy health check at all.
-        """
-        from curl_cffi import requests as cffi_requests
-        try:
-            r = cffi_requests.get(
-                "https://www.olx.ro/imobiliare/apartamente-garsoniere-de-inchiriat/bucuresti/",
-                proxies={"https": proxy_url, "http": proxy_url},
-                impersonate="chrome120",
-                timeout=15,
-            )
-            return r.status_code == 200 and 'data-cy="l-card"' in r.text
         except Exception:
             return False
 
@@ -227,26 +272,42 @@ class ProxyRotator:
         Pick one proxy for this crawl run (round-robin across runs).
         Tries proxies in order until one passes:
           1. Basic connectivity (api.ipify.org)
-          2. Platform checks — verifies the proxy can reach a real page
-             (not a CF challenge) for each platform in check_platforms.
+          2. A platform check — verifies the proxy can reach a real Storia
+             page (not a CF challenge).
         Returns the chosen proxy URL, or None if unavailable / all dead.
 
-        Imobiliare is deliberately excluded here: its DataDome protection
-        blocks the entire Webshare datacenter IP range (confirmed 0/100 pass
-        rate), while direct/unproxied requests succeed fine. Gating proxy
-        selection on an imobiliare check that can never pass meant the AND
-        across platforms always failed, so every combined-platform crawl
-        silently fell back to no proxy at all — including for Storia, which
-        actually needs one. Imobiliare's own scraper always bypasses the
-        session proxy (see ImobiliareRoScraper), so it's unaffected either way.
+        Only Storia uses the session proxy (PROXIED_PLATFORMS). OLX and
+        Imobiliare go direct, and are deliberately NOT part of the check:
+          - Imobiliare: DataDome blocks the entire Webshare datacenter range
+            (0/100 pass), while unproxied requests succeed.
+          - OLX: started returning 403 to the whole Webshare range between
+            10-26 and 11-03-2026, while Cloud Run's own egress IP is fine.
+        Gating selection on a platform that can never pass makes the AND
+        across platforms always fail, so the loop burns its whole time budget
+        and every run silently falls back to no proxy — including for Storia,
+        whose Cloudflare blocks ~98% of unproxied rechecks. That is exactly
+        how the 2026-11 Storia recheck outage happened (OLX gating, same
+        failure mode as the earlier Imobiliare one).
+
+        check_platforms=None means connectivity-only. A list that contains no
+        proxied platform (e.g. --platform olx) skips proxy selection
+        entirely: nothing would use it.
         """
         if not self._proxies:
             print("  [proxies] no proxy file supplied — crawling without proxy")
             return None
 
+        if check_platforms is not None and not (set(check_platforms) & self.PROXIED_PLATFORMS):
+            print(
+                f"  [proxies] none of {list(check_platforms)} uses the session "
+                f"proxy — crawling without proxy"
+            )
+            _http.set_proxy(None)
+            os.environ.pop("PROXY_URL", None)
+            return None
+
         start_idx = self._load_index()
         n = len(self._proxies)
-        check_olx    = bool(check_platforms and "olx" in check_platforms)
         check_storia = bool(check_platforms and "storia" in check_platforms)
         deadline = time.time() + self._MAX_HEALTH_CHECK_SECONDS
 
@@ -262,11 +323,6 @@ class ProxyRotator:
             if not self._verify(proxy):
                 print("dead — trying next")
                 continue
-            if check_olx:
-                print("connectivity OK … olx … ", end="", flush=True)
-                if not self._verify_for_olx(proxy):
-                    print("blocked by OLX — trying next")
-                    continue
             if check_storia:
                 print("connectivity OK … storia … ", end="", flush=True)
                 if not self._verify_for_storia(proxy):
@@ -779,10 +835,15 @@ def _trigger_embedder_job() -> None:
 def run_availability_check(
     platforms: list[str] | None = None,
     limit: int | None = None,
+    skip_seen_within_hours: float | None = None,
 ) -> None:
     """Check every non-expired listing and mark unavailable ones is_available=0.
 
     Skips listings already at is_available=0 (confirmed expired).
+    Works through the stalest listings first, and — if skip_seen_within_hours
+    is set — leaves out any listing confirmed live within that window, so an
+    automatic Cloud Run retry after a task timeout resumes where the killed
+    attempt stopped instead of redoing the whole queue.
     Skips blocked/network errors — they'll be retried on the next weekly run.
     Flushes DB updates in chunks of 100 so progress is not lost if the job dies.
 
@@ -804,7 +865,9 @@ def run_availability_check(
 
     try:
         print("\n[avail-check] Fetching listings to check…", flush=True)
-        all_listings = db_utils.get_listings_for_availability_check(limit=limit)
+        all_listings = db_utils.get_listings_for_availability_check(
+            limit=limit, skip_seen_within_hours=skip_seen_within_hours
+        )
         if not all_listings:
             print("[avail-check] Nothing to check.", flush=True)
             return
@@ -973,6 +1036,14 @@ def main():
         help="For availability-check: process only the first N listings and stop.",
     )
     parser.add_argument(
+        "--recheck-after-hours",
+        type=float,
+        default=12.0,
+        help="For availability-check: skip listings confirmed live within the "
+             "last N hours, so a retry resumes instead of redoing finished work "
+             "(default: 12; 0 = recheck everything).",
+    )
+    parser.add_argument(
         "--loop",
         action="store_true",
         help="Run continuously, sleeping a random interval between crawls (use with Task Scheduler at boot)",
@@ -1005,12 +1076,7 @@ def main():
     if args.max_pages is None:
         args.max_pages = 5 if args.mode == "incremental" else 50
 
-    if args.proxy_file:
-        rotator = ProxyRotator.from_file(args.proxy_file)
-    elif os.environ.get("PROXY_LIST"):
-        rotator = ProxyRotator.from_env()
-    else:
-        rotator = ProxyRotator([])
+    rotator = ProxyRotator.from_config(args.proxy_file)
 
     if args.mode == "availability-check":
         rotator.apply_for_session(check_platforms=platforms)
@@ -1018,6 +1084,7 @@ def main():
             platforms=None if args.platform == "all"
             else [p.strip() for p in args.platform.split(",")],
             limit=args.limit,
+            skip_seen_within_hours=args.recheck_after_hours or None,
         )
         sys.exit(0)
 

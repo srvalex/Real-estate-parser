@@ -225,7 +225,7 @@ class OLXScraper(PlatformScraper):
         links = []
         for n in range(1, num_pages + 1):
             paged = search_url if n == 1 else f"{search_url}?page={n}"
-            html = get_content(paged)
+            html = get_content(paged, use_proxy=False)
             if not html:
                 continue
             soup = BeautifulSoup(html, "html.parser")
@@ -261,9 +261,16 @@ class OLXScraper(PlatformScraper):
           status: "success" | "expired" | "blocked"
           data:   parsed listing dict (only present when status == "success")
 
-        Expired detection (two signals):
+        Expired detection (three signals):
           1. HTTP 410 Gone — OLX's canonical response for removed listings.
-          2. data-testid="ad-inactive-msg" in the HTML — shown when OLX serves
+          2. HTTP 404 Not Found — what OLX actually returns for removed ads
+             now. Confirmed live 2026-10-14: 16/16 sampled "available" rows
+             that the recheck had been unable to confirm for 7+ days (879 of
+             4,958 OLX rows) returned a bare 404 with no ad content. Treating
+             it as "blocked" meant those listings were retried forever and
+             never marked unavailable. 403/429/5xx remain "blocked" — those
+             are the bot-protection / transient signals, a 404 is not.
+          3. data-testid="ad-inactive-msg" in the HTML — shown when OLX serves
              a soft-deleted page with a 200 instead of 410.
 
         `city` selects which neighbourhood list _extract_district_from_title
@@ -274,14 +281,17 @@ class OLXScraper(PlatformScraper):
         unchanged for callers that don't pass it.
         """
         from curl_cffi import requests as cffi_requests
-        from scrapers.http import HEADERS, get_proxy
-        proxy_url = get_proxy()
-        proxies = {"https": proxy_url, "http": proxy_url} if proxy_url else None
+        from scrapers.http import HEADERS
+        # Always direct, never the session proxy. OLX returns 403 to the whole
+        # Webshare datacenter range (confirmed 2026-11-09: 12/12 proxies tested
+        # from outside GCP, 89/100 in the crawler job) while serving Cloud Run's
+        # own egress IP fine (3,120 of 3,121 rechecks succeeded unproxied). Same
+        # reasoning as Imobiliare, which also bypasses the session proxy.
         try:
             response = cffi_requests.get(
-                url, headers=HEADERS, impersonate="chrome120", proxies=proxies
+                url, headers=HEADERS, impersonate="chrome120"
             )
-            if response.status_code == 410:
+            if response.status_code in (404, 410):
                 return {"url": url, "status": self.STATUS_EXPIRED}
             if response.status_code != 200:
                 return {"url": url, "status": self.STATUS_BLOCKED}

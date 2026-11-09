@@ -96,6 +96,21 @@ gcloud run jobs create embedder-job \
 #     gcloud secrets versions add proxy-list --data-file=-
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 7b. WEBSHARE API KEY (preferred over the static proxy-list secret)
+#    With WEBSHARE_API_KEY set, crawler.py pulls the live proxy list from the
+#    Webshare API on every run (no manual re-export); PROXY_LIST stays as the
+#    fallback if the API call fails. Create the key in Webshare dashboard →
+#    API, then:
+# ─────────────────────────────────────────────────────────────────────────────
+# printf '%s' "YOUR_WEBSHARE_API_KEY" | gcloud secrets create webshare-api-key --data-file=-
+# gcloud secrets add-iam-policy-binding webshare-api-key \
+#   --member "serviceAccount:${SA}" --role roles/secretmanager.secretAccessor
+# for JOB in crawler-job avail-check-job; do
+#   gcloud run jobs update ${JOB} --region ${REGION} \
+#     --update-secrets "WEBSHARE_API_KEY=webshare-api-key:latest"
+# done
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 8. MANUAL TEST RUNS
 # ─────────────────────────────────────────────────────────────────────────────
 # gcloud run jobs execute crawler-job     --region ${REGION} --wait
