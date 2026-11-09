@@ -10,6 +10,13 @@ RUN pip install --no-cache-dir -r requirements-crawler.txt
 # Without these, browsers and models land in /root/.cache which appuser can't access.
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/pw-browsers
 ENV HF_HOME=/app/hf-cache
+# playwright's bundled node binary links libatomic, which python:3.12-slim does
+# not ship; without it `playwright install` dies with exit 127 before it can
+# even install its own --with-deps packages (requirements are unpinned, so a
+# newer playwright pulled this in on the 2026-11-10 build).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
 RUN playwright install --with-deps chromium
 
 # Pre-download SentenceTransformer model into the image layer
